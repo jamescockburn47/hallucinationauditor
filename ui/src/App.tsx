@@ -43,6 +43,7 @@ interface VerificationResult {
   citations: {
     citation_id: string
     citation_text: string
+    case_name?: string | null
     outcome: 'supported' | 'contradicted' | 'unclear' | 'unverifiable' | 'needs_review'
     hallucination_type?: string | null
     hallucination_type_name?: string | null
@@ -906,7 +907,11 @@ function App() {
                               {getOutcomeIcon(cit.outcome, cit.case_retrieved)}
                               <div className="citation-info">
                                 <div className="citation-header">
-                                  <span className="citation-text">{cit.citation_text}</span>
+                                  {cit.case_name ? (
+                                    <span className="case-name-main">{cit.case_name}</span>
+                                  ) : (
+                                    <span className="citation-text">{cit.citation_text}</span>
+                                  )}
                                   {cit.case_retrieved && (
                                     <span className={`source-badge ${cit.source_type || 'primary'}`}>
                                       {cit.source_type === 'web_search' 
@@ -919,7 +924,12 @@ function App() {
                                     </span>
                                   )}
                                 </div>
-                                {cit.authority_title && cit.authority_title !== 'Unknown Case' && (
+                                {cit.case_name && (
+                                  <div className="citation-ref">
+                                    <span className="citation-text-secondary">{cit.citation_text}</span>
+                                  </div>
+                                )}
+                                {cit.authority_title && cit.authority_title !== 'Unknown Case' && cit.authority_title !== cit.case_name && (
                                   <div className="authority-info">
                                     <span className="authority-title">{cit.authority_title}</span>
                                     {cit.authority_url && (

@@ -683,6 +683,23 @@ html, body {
   color: var(--color-text);
 }
 
+.case-name-main {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+  font-style: italic;
+}
+
+.citation-ref {
+  margin-top: 0.25rem;
+}
+
+.citation-text-secondary {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
 .outcome-badge {
   font-size: 0.75rem;
   font-weight: 600;

@@ -265,6 +265,59 @@ def extract_text_from_file(file_path: Path, file_type: str) -> str:
             return f.read()
 
 
+def extract_case_name_from_text(text: str, citation: str) -> Optional[str]:
+    """
+    Extract case name from text that contains a citation.
+    
+    Looks for patterns like:
+    - "Caparo Industries plc v Dickman [1990] 2 AC 605"
+    - "R v Smith [2020] UKSC 15"
+    - "Secretary of State for the Home Department v AF [2009] UKHL 28"
+    """
+    # First, check if the citation itself contains a case name (common format)
+    # Pattern: "Case Name [citation]" or "Case Name citation"
+    
+    # Look for text immediately before the citation
+    citation_pos = text.find(citation)
+    if citation_pos > 0:
+        # Look at the 150 chars before the citation
+        prefix = text[max(0, citation_pos - 150):citation_pos].strip()
+        
+        # Try to find case name pattern at the end of prefix
+        # More comprehensive pattern for case names
+        case_patterns = [
+            # Full pattern: Party1 v Party2 (most common)
+            r"([A-Z][A-Za-z'\-\.]+(?:\s+(?:Industries|Holdings|International|Services|Group|Limited|Ltd|plc|PLC|Inc|Corporation|Corp|Co|&\s*Co\.?|and\s+(?:Others?|Another|Ors)))*)\s+v\.?\s+([A-Z][A-Za-z'\-\.]+(?:\s+(?:Industries|Holdings|International|Services|Group|Limited|Ltd|plc|PLC|Inc|Corporation|Corp|Co|&\s*Co\.?|and\s+(?:Others?|Another|Ors)|for\s+[A-Za-z\s]+|of\s+[A-Za-z\s]+))*)\s*$",
+            # R v / Regina v pattern
+            r"(R|Regina|Rex)\s+v\.?\s+([A-Z][A-Za-z'\-\.\s]+?)\s*$",
+            # Secretary of State pattern
+            r"(Secretary\s+of\s+State\s+for\s+[A-Za-z\s]+)\s+v\.?\s+([A-Z][A-Za-z'\-\.]+(?:\s+(?:and\s+(?:Others?|Another|Ors)))?)\s*$",
+            # In re / Re pattern
+            r"((?:In\s+)?[Rr]e\s+[A-Z][A-Za-z'\-\.\s]+?)\s*$",
+        ]
+        
+        for pattern in case_patterns:
+            match = re.search(pattern, prefix)
+            if match:
+                case_name = match.group(0).strip()
+                # Clean up any trailing whitespace
+                case_name = re.sub(r'\s+', ' ', case_name).strip()
+                if len(case_name) > 5:
+                    logger.debug(f"Extracted case name '{case_name}' from prefix")
+                    return case_name
+    
+    # Also check if case name is embedded in the citation text itself
+    # e.g., "Caparo Industries plc v Dickman [1990] 2 AC 605"
+    v_pattern = r"^([A-Z][A-Za-z'\-\.]+(?:\s+[A-Za-z'\-\.&]+)*)\s+v\.?\s+([A-Z][A-Za-z'\-\.]+(?:\s+[A-Za-z'\-\.&]+)*)\s*\["
+    v_match = re.match(v_pattern, citation)
+    if v_match:
+        case_name = f"{v_match.group(1)} v {v_match.group(2)}"
+        logger.debug(f"Extracted case name '{case_name}' from citation text")
+        return case_name
+    
+    return None
+
+
 def find_citations_in_text(text: str) -> List[Dict[str, Any]]:
     """
     Find all UK legal citations in text with their positions and context.
@@ -839,9 +892,20 @@ def run_audit_pipeline(job_id: str, claims: List[ClaimInput], web_search_enabled
             if not citation_text:
                 continue
             
+            # Extract case name from the citation object or from context
+            case_name = getattr(citation, 'case_name', None)
+            if not case_name:
+                # Try to extract from the claim text
+                case_name = extract_case_name_from_text(claim.text, citation_text)
+            
+            logger.info(f"Processing citation: {citation_text}")
+            if case_name:
+                logger.info(f"  Case name: {case_name}")
+            
             # Step 1: Resolve citation to URL (FCL / BAILII)
             resolution = resolve_citation_to_urls(
                 citation_text=citation_text,
+                case_name=case_name,
                 job_id=job_id
             )
             
@@ -857,6 +921,17 @@ def run_audit_pipeline(job_id: str, claims: List[ClaimInput], web_search_enabled
             source_type = "not_found"
             verification_level = "unverified"
             matching_paragraphs = []  # Will contain matching judgment paragraphs
+            
+            # Get case name from resolution if we didn't have one
+            resolved_case_name = resolution.get("case_name") or case_name
+            
+            # If resolution found candidates, get title from first candidate
+            if resolution.get("candidate_urls"):
+                first_candidate = resolution["candidate_urls"][0]
+                if first_candidate.get("title"):
+                    authority_title = first_candidate["title"]
+                    if not resolved_case_name:
+                        resolved_case_name = first_candidate["title"]
             
             # Determine source type from URL
             def get_source_type(url: str) -> str:
@@ -950,11 +1025,12 @@ def run_audit_pipeline(job_id: str, claims: List[ClaimInput], web_search_enabled
             citation_result = {
                 "citation_id": citation_id,
                 "citation_text": citation_text,
+                "case_name": resolved_case_name,  # Case name extracted or from search
                 "outcome": outcome,
                 "hallucination_type": hallucination_type,
                 "hallucination_type_name": hallucination_type_name,
                 "authority_url": authority_url,
-                "authority_title": authority_title,
+                "authority_title": authority_title or resolved_case_name,  # Use case name if no title
                 "case_retrieved": case_retrieved,
                 "confidence": confidence,
                 "notes": notes,
