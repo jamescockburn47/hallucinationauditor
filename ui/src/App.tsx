@@ -536,18 +536,32 @@ function App() {
                 <div className="info-card">
                   <h3>🔒 Privacy & Security</h3>
                   <p>
-                    <strong>All analysis runs locally on your machine.</strong> Your documents are processed 
-                    in a private and secure environment. No document content is sent to external servers 
-                    for analysis.
+                    This tool is available in two modes with different privacy characteristics:
                   </p>
-                  <p>
-                    The only external requests made are to official legal databases (Find Case Law, BAILII) 
-                    to retrieve publicly available judgments.
-                  </p>
+                  <div className="privacy-modes">
+                    <div className="privacy-mode local">
+                      <strong>🖥️ Local Download (Maximum Privacy)</strong>
+                      <ul>
+                        <li>All processing happens on your machine</li>
+                        <li>Documents never leave your computer</li>
+                        <li>Only citation lookups go to FCL/BAILII</li>
+                        <li><a href="https://github.com/jamescockburn47/hallucinationauditor" target="_blank" rel="noopener noreferrer">Download from GitHub →</a></li>
+                      </ul>
+                    </div>
+                    <div className="privacy-mode online">
+                      <strong>🌐 Online Version</strong>
+                      <ul>
+                        <li>Document parsing happens in your browser</li>
+                        <li>Only extracted citations are sent to the server</li>
+                        <li>Full document content stays client-side</li>
+                        <li>No documents are stored on any server</li>
+                      </ul>
+                    </div>
+                  </div>
                   <p className="warning-note">
                     <AlertCircle size={14} />
-                    <strong>Exception:</strong> If you enable the "Web Search" option, citation text will be 
-                    sent to external search engines as a fallback for cases not found in primary databases.
+                    <strong>Web Search:</strong> If enabled, citation text is sent to external search engines. 
+                    This is opt-in and requires your explicit consent.
                   </p>
                 </div>
 
@@ -583,6 +597,34 @@ function App() {
                     <li><strong>Keyword Match:</strong> Your proposition is compared against judgment paragraphs</li>
                     <li><strong>Display Results:</strong> Matching paragraphs are shown with direct links</li>
                   </ol>
+                </div>
+              </div>
+
+              <div className="info-card get-started-card">
+                <h3>🚀 Get Started</h3>
+                <div className="get-started-options">
+                  <div className="get-started-option">
+                    <h4>Use Online</h4>
+                    <p>Start using the tool right now in your browser. Documents are parsed client-side for privacy.</p>
+                    <button 
+                      className="get-started-btn primary"
+                      onClick={() => setActiveTab('audit')}
+                    >
+                      Start Auditing →
+                    </button>
+                  </div>
+                  <div className="get-started-option">
+                    <h4>Download Locally</h4>
+                    <p>For maximum privacy, run the tool entirely on your own machine.</p>
+                    <a 
+                      href="https://github.com/jamescockburn47/hallucinationauditor" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="get-started-btn secondary"
+                    >
+                      View on GitHub →
+                    </a>
+                  </div>
                 </div>
               </div>
 
