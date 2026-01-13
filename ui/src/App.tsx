@@ -1589,7 +1589,24 @@ function App() {
 
       {/* Footer */}
       <footer className="footer">
-        <p>Matthew Lee Bot © {new Date().getFullYear()} • Powered by Find Case Law & BAILII</p>
+        <div className="footer-content">
+          <div className="footer-main">
+            <p className="footer-title">Matthew Lee Bot © {new Date().getFullYear()}</p>
+            <p className="footer-powered">Powered by <a href="https://caselaw.nationalarchives.gov.uk/" target="_blank" rel="noopener noreferrer">Find Case Law</a> & <a href="https://www.bailii.org/" target="_blank" rel="noopener noreferrer">BAILII</a></p>
+          </div>
+          <div className="footer-developer">
+            <p>Developed by <a href="https://www.jamescockburn.io" target="_blank" rel="noopener noreferrer">James Cockburn</a>, Solicitor</p>
+          </div>
+        </div>
+        <div className="footer-disclaimer">
+          <p>
+            <strong>Disclaimer:</strong> This is an experimental tool for educational and research purposes only. 
+            It is not a substitute for professional legal research and should not be relied upon for legal advice, 
+            court submissions, or any professional legal work. The developers accept no liability for any errors, 
+            omissions, or consequences arising from its use. Always verify citations manually before relying on them 
+            in any legal context.
+          </p>
+        </div>
       </footer>
     </div>
   )
