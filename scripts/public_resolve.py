@@ -300,13 +300,103 @@ def search_fcl_by_query(query: str, timeout: int = 30) -> List[Dict[str, Any]]:
         return []
 
 
-def search_bailii(query: str, year: Optional[str] = None, timeout: int = 30) -> List[Dict[str, Any]]:
+def try_bailii_direct_url(case_name: str, year: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
     """
-    Search BAILII for cases.
+    Try to find a case on BAILII by trying known court URL patterns.
+    
+    For cases like Caparo [1990] 2 AC 605, AC = Appeal Cases = House of Lords
+    """
+    if requests is None or not year:
+        return None
+    
+    # Map law report abbreviations to likely courts
+    # AC = Appeal Cases (House of Lords / Supreme Court)
+    # For House of Lords before 2009, try UKHL
+    
+    courts_to_try = [
+        ("UKHL", "uk"),   # House of Lords (pre-2009)
+        ("UKSC", "uk"),   # Supreme Court (2009+)
+        ("EWCA/Civ", "ew"),  # Court of Appeal Civil
+        ("EWCA/Crim", "ew"), # Court of Appeal Criminal
+    ]
+    
+    year_int = int(year)
+    
+    # For pre-2009 appeals, prioritize UKHL
+    if year_int < 2009:
+        courts_to_try = [("UKHL", "uk")] + courts_to_try
+    
+    # Extract key search terms from case name
+    search_terms = []
+    if case_name:
+        # Get significant words
+        words = re.findall(r'\b([A-Z][a-z]+)\b', case_name)
+        search_terms = [w.lower() for w in words if w.lower() not in ['the', 'and', 'plc', 'ltd', 'limited']]
+    
+    for court, jurisdiction in courts_to_try[:2]:  # Only try first 2 courts
+        court_path = court.replace("/", "/")
+        
+        # Try first 10 case numbers for that year
+        for case_num in range(1, 15):
+            url = f"https://www.bailii.org/{jurisdiction}/cases/{court}/{year}/{case_num}.html"
+            
+            try:
+                response = requests.head(
+                    url,
+                    timeout=5,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                    allow_redirects=True
+                )
+                
+                if response.status_code == 200:
+                    # Verify it's the right case by fetching and checking content
+                    full_response = requests.get(
+                        url,
+                        timeout=timeout,
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                    )
+                    
+                    if full_response.status_code == 200:
+                        content_lower = full_response.text.lower()
+                        
+                        # Check if search terms appear in the content
+                        matches = sum(1 for term in search_terms if term in content_lower)
+                        if matches >= min(2, len(search_terms)):
+                            # Found it!
+                            # Try to extract title
+                            title = case_name or f"BAILII {court} {year}/{case_num}"
+                            
+                            try:
+                                from bs4 import BeautifulSoup
+                                soup = BeautifulSoup(full_response.text, 'lxml')
+                                title_tag = soup.find('title')
+                                if title_tag:
+                                    title = title_tag.get_text().strip()
+                            except:
+                                pass
+                            
+                            logger.info(f"Found case on BAILII: {url}")
+                            return {
+                                "title": title,
+                                "url": url,
+                                "source": "bailii",
+                                "confidence": 0.85,
+                            }
+                            
+            except requests.exceptions.RequestException:
+                continue
+    
+    return None
+
+
+def search_bailii(query: str, year: Optional[str] = None, case_name: Optional[str] = None, timeout: int = 30) -> List[Dict[str, Any]]:
+    """
+    Search BAILII for cases using multiple strategies.
     
     Args:
         query: Search query (party names)
         year: Optional year filter
+        case_name: Full case name for direct URL matching
         timeout: Request timeout
         
     Returns:
@@ -317,19 +407,26 @@ def search_bailii(query: str, year: Optional[str] = None, timeout: int = 30) -> 
     
     results = []
     
+    # Strategy 1: Try direct URL construction for known courts
+    if case_name and year:
+        direct_result = try_bailii_direct_url(case_name, year, timeout)
+        if direct_result:
+            results.append(direct_result)
+            return results  # Found it directly!
+    
+    # Strategy 2: Use BAILII's search interface
     try:
-        # BAILII search URL - use their case title search
-        search_url = "https://www.bailii.org/cgi-bin/markup.cgi"
+        # BAILII search URL
+        search_url = "https://www.bailii.org/cgi-bin/find.cgi"
         
         # Build search query for BAILII
         search_query = query
         if year:
-            search_query = f"{query} {year}"
+            search_query = f'"{query}" {year}'
         
         params = {
             "query": search_query,
-            "method": "boolean",
-            "mask_path": "+uk/cases +ew/cases +ie/cases +nie/cases +scot/cases",
+            "mask_path": "",  # Search all
         }
         
         logger.debug(f"BAILII search: {search_url} query={search_query}")
@@ -338,53 +435,52 @@ def search_bailii(query: str, year: Optional[str] = None, timeout: int = 30) -> 
             search_url,
             params=params,
             timeout=timeout,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; HallucinationAuditor/0.3.0)"}
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"}
         )
         
         if response.status_code != 200:
             logger.warning(f"BAILII search returned {response.status_code}")
-            # Fallback: try direct Google search via BAILII
-            return results
-        
-        # Parse results from HTML
-        try:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(response.text, 'lxml')
-            
-            # Look for links to case pages
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                text = link.get_text().strip()
+        else:
+            # Parse results from HTML
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(response.text, 'lxml')
                 
-                # BAILII case URLs follow pattern: /uk/cases/COURT/YEAR/NUMBER.html
-                if '/cases/' in href and (href.endswith('.html') or '/cases/' in href):
-                    # Make URL absolute
-                    if href.startswith('/'):
-                        full_url = f"https://www.bailii.org{href}"
-                    elif href.startswith('http'):
-                        full_url = href
-                    else:
-                        continue
+                # Look for links to case pages
+                for link in soup.find_all('a', href=True):
+                    href = link.get('href', '')
+                    text = link.get_text().strip()
                     
-                    # Check if year matches (if provided)
-                    if year and year not in href and year not in text:
-                        continue
-                    
-                    # Skip navigation links
-                    if len(text) < 5 or text.lower() in ['next', 'previous', 'back']:
-                        continue
-                    
-                    results.append({
-                        "title": text,
-                        "url": full_url,
-                        "source": "bailii",
-                    })
-                    
-                    if len(results) >= 5:
-                        break
+                    # BAILII case URLs follow pattern: /uk/cases/COURT/YEAR/NUMBER.html
+                    if '/cases/' in href and href.endswith('.html'):
+                        # Make URL absolute
+                        if href.startswith('/'):
+                            full_url = f"https://www.bailii.org{href}"
+                        elif href.startswith('http'):
+                            full_url = href
+                        else:
+                            continue
                         
-        except ImportError:
-            logger.warning("BeautifulSoup not installed, BAILII search disabled")
+                        # Check if year matches (if provided)
+                        if year and year not in href and year not in text:
+                            continue
+                        
+                        # Skip navigation links
+                        if len(text) < 5 or text.lower() in ['next', 'previous', 'back', 'home']:
+                            continue
+                        
+                        results.append({
+                            "title": text,
+                            "url": full_url,
+                            "source": "bailii",
+                            "confidence": 0.75,
+                        })
+                        
+                        if len(results) >= 5:
+                            break
+                            
+            except ImportError:
+                logger.warning("BeautifulSoup not installed, BAILII HTML parsing disabled")
         
         logger.info(f"BAILII search found {len(results)} results")
         return results
@@ -480,8 +576,8 @@ def resolve_traditional_citation(citation_text: str, case_name: Optional[str] = 
     
     # If no FCL results, try BAILII
     if not candidates:
-        logger.info(f"No FCL results, trying BAILII search")
-        bailii_results = search_bailii(query, year)
+        logger.info(f"No FCL results, trying BAILII search for {case_name or query}")
+        bailii_results = search_bailii(query, year, case_name=case_name)
         for result in bailii_results:
             candidates.append({
                 "url": result.get("url"),
