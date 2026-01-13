@@ -265,6 +265,19 @@ def extract_text_from_file(file_path: Path, file_type: str) -> str:
             return f.read()
 
 
+def extract_case_name_from_citation(citation_text: str) -> Optional[str]:
+    """
+    Extract case name from a citation string like "Montgomery v Lanarkshire [2015] UKSC 11".
+    """
+    # Pattern: "Name v Name [YEAR] COURT NUM"
+    match = re.match(r'^(.*?)\s*\[\d{4}\]', citation_text.strip())
+    if match:
+        name = match.group(1).strip()
+        if name and len(name) > 2:
+            return name
+    return None
+
+
 def extract_case_name_from_text(text: str, citation: str) -> Optional[str]:
     """
     Extract case name from text that contains a citation.
@@ -1160,6 +1173,142 @@ async def get_report(job_id: str):
         raise HTTPException(status_code=404, detail="Report not found")
     
     return safe_read_json(report_path)
+
+
+# ===== CLIENT-SIDE PRIVACY MODE ENDPOINTS =====
+# These endpoints only accept citation strings, not document content
+# For use when document parsing happens client-side in the browser
+
+class CitationResolveRequest(BaseModel):
+    """Request to resolve citations - no document content needed"""
+    citations: List[str]
+    web_search_enabled: bool = False
+
+
+class ResolvedCitation(BaseModel):
+    """Citation with resolved judgment data"""
+    citation: str
+    case_name: Optional[str] = None
+    source_type: str  # 'fcl', 'bailii', 'web_search', 'not_found'
+    url: Optional[str] = None
+    title: Optional[str] = None
+    paragraphs: List[Dict[str, Any]] = []
+    error: Optional[str] = None
+
+
+class CitationResolveResponse(BaseModel):
+    """Response with resolved citations and judgment paragraphs"""
+    resolved: List[ResolvedCitation]
+    summary: Dict[str, int]
+
+
+@app.post("/api/resolve-citations", response_model=CitationResolveResponse)
+async def resolve_citations_only(request: CitationResolveRequest):
+    """
+    Resolve citations to URLs and fetch judgment paragraphs.
+    
+    This endpoint accepts ONLY citation strings, not document content.
+    For use with client-side document parsing where the browser handles
+    text extraction and citation extraction locally.
+    
+    Privacy: No document content is sent to this endpoint.
+    Only extracted citation strings are processed.
+    """
+    logger.info(f"Resolving {len(request.citations)} citations (client-side mode)")
+    
+    resolved_citations = []
+    summary = {"total": len(request.citations), "found": 0, "not_found": 0}
+    
+    for citation_text in request.citations:
+        citation_text = citation_text.strip()
+        if not citation_text:
+            continue
+        
+        # Extract case name from citation
+        case_name = extract_case_name_from_citation(citation_text)
+        
+        try:
+            # Resolve citation to URL
+            resolution = resolve_citation_to_urls(
+                citation_text=citation_text,
+                case_name=case_name,
+                enable_web_search=request.web_search_enabled
+            )
+            
+            # Check if resolution was successful
+            if resolution and resolution.get("resolution_status") == "resolved" and resolution.get("candidate_urls"):
+                candidate = resolution["candidate_urls"][0]
+                url = candidate["url"]
+                source_type = candidate.get("source", "unknown")
+                title = resolution.get("case_name") or case_name
+                
+                # Fetch and parse the judgment
+                paragraphs = []
+                try:
+                    job_id = f"resolve_{uuid.uuid4().hex[:8]}"
+                    cache_dir = ensure_cache_dir(job_id)
+                    
+                    # Fetch the document
+                    fetch_result = fetch_and_cache_url(
+                        url=url,
+                        cache_dir=cache_dir
+                    )
+                    
+                    if fetch_result and fetch_result.get("file_path"):
+                        # Parse it
+                        parsed = parse_authority_document(
+                            fetch_result["file_path"],
+                            url=url
+                        )
+                        
+                        if parsed and parsed.get("paragraphs"):
+                            # Return simplified paragraphs
+                            paragraphs = [
+                                {
+                                    "para_num": p.get("para_num", str(i+1)),
+                                    "text": p.get("text", "")[:500],  # Limit text length
+                                    "speaker": p.get("speaker")
+                                }
+                                for i, p in enumerate(parsed["paragraphs"])
+                                if p.get("text") and len(p.get("text", "")) > 20
+                            ][:100]  # Limit to 100 paragraphs
+                            
+                except Exception as e:
+                    logger.warning(f"Error fetching/parsing {url}: {e}")
+                
+                resolved_citations.append(ResolvedCitation(
+                    citation=citation_text,
+                    case_name=case_name or title,
+                    source_type=source_type,
+                    url=url,
+                    title=title,
+                    paragraphs=paragraphs
+                ))
+                summary["found"] += 1
+                
+            else:
+                resolved_citations.append(ResolvedCitation(
+                    citation=citation_text,
+                    case_name=case_name,
+                    source_type="not_found",
+                    error="Citation could not be resolved to a URL"
+                ))
+                summary["not_found"] += 1
+                
+        except Exception as e:
+            logger.error(f"Error resolving {citation_text}: {e}")
+            resolved_citations.append(ResolvedCitation(
+                citation=citation_text,
+                case_name=case_name,
+                source_type="not_found",
+                error=str(e)
+            ))
+            summary["not_found"] += 1
+    
+    return CitationResolveResponse(
+        resolved=resolved_citations,
+        summary=summary
+    )
 
 
 @app.post("/api/extract")

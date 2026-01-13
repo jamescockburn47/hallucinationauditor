@@ -16,9 +16,17 @@ import {
   X,
   MessageSquareQuote,
   Gavel,
-  Search
+  Search,
+  Shield,
+  ShieldCheck
 } from 'lucide-react'
 import './App.css'
+
+// Client-side processing for privacy mode
+import { extractTextFromFile, getFileTypeDescription } from './lib/documentParser'
+import { extractCitations, extractPropositions, formatCitation } from './lib/citationExtractor'
+import { findMatchingParagraphs, calculateConfidence, determineOutcome } from './lib/verifier'
+import { resolveCitations } from './lib/api'
 
 interface Citation {
   raw: string
@@ -126,6 +134,10 @@ function App() {
   // Web search consent
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   
+  // Privacy mode - process documents client-side
+  const [privacyMode, setPrivacyMode] = useState(true) // Default to privacy mode ON
+  const [processingStatus, setProcessingStatus] = useState<string>('')
+  
   // How it works section
   const [showHowItWorks, setShowHowItWorks] = useState(false)
 
@@ -230,39 +242,92 @@ function App() {
 
     setIsExtracting(true)
     setError(null)
+    setProcessingStatus('')
 
     try {
-      const formData = new FormData()
-      formData.append('file', uploadedFile)
-
-      const response = await fetch('http://localhost:8000/api/extract', {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Extraction failed')
-      }
-
-      const data = await response.json()
-      
-      if (data.claims && data.claims.length > 0) {
-        const extractedClaims: Claim[] = data.claims.map((c: any, i: number) => ({
-          id: String(Date.now() + i),
-          text: c.text,
-          citations: c.citations.map((cit: any) => ({ raw: cit.raw }))
-        }))
+      if (privacyMode) {
+        // CLIENT-SIDE PROCESSING - Document never leaves browser
+        setProcessingStatus('Parsing document locally...')
         
-        setClaims(extractedClaims)
-        setJobTitle(data.suggested_title || uploadedFile.name.replace(/\.[^/.]+$/, ''))
+        // Extract text from the file in the browser
+        const text = await extractTextFromFile(uploadedFile)
+        
+        if (!text || text.trim().length < 50) {
+          throw new Error('Could not extract text from document')
+        }
+        
+        setProcessingStatus('Extracting citations...')
+        
+        // Extract propositions with their citations
+        const propositions = extractPropositions(text)
+        
+        if (propositions.length > 0) {
+          const extractedClaims: Claim[] = propositions.map((prop, i) => ({
+            id: String(Date.now() + i),
+            text: prop.proposition,
+            citations: prop.citations.map(cit => ({ 
+              raw: formatCitation(cit)
+            }))
+          }))
+          
+          setClaims(extractedClaims)
+          setJobTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
+          setProcessingStatus(`Found ${extractedClaims.length} claims with citations`)
+        } else {
+          // Try to find just citations without propositions
+          const citations = extractCitations(text)
+          if (citations.length > 0) {
+            // Create claims from citations without specific propositions
+            const extractedClaims: Claim[] = citations.slice(0, 20).map((cit, i) => ({
+              id: String(Date.now() + i),
+              text: `Verify citation: ${formatCitation(cit)}`,
+              citations: [{ raw: formatCitation(cit) }]
+            }))
+            setClaims(extractedClaims)
+            setJobTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
+            setProcessingStatus(`Found ${citations.length} citations (no propositions extracted)`)
+          } else {
+            setError('No legal citations found in the document')
+          }
+        }
       } else {
-        setError('No legal propositions with citations found in the document')
+        // SERVER-SIDE PROCESSING - Legacy mode
+        setProcessingStatus('Uploading to server...')
+        
+        const formData = new FormData()
+        formData.append('file', uploadedFile)
+
+        const response = await fetch('http://localhost:8000/api/extract', {
+          method: 'POST',
+          body: formData
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.detail || 'Extraction failed')
+        }
+
+        const data = await response.json()
+        
+        if (data.claims && data.claims.length > 0) {
+          const extractedClaims: Claim[] = data.claims.map((c: any, i: number) => ({
+            id: String(Date.now() + i),
+            text: c.text,
+            citations: c.citations.map((cit: any) => ({ raw: cit.raw }))
+          }))
+          
+          setClaims(extractedClaims)
+          setJobTitle(data.suggested_title || uploadedFile.name.replace(/\.[^/.]+$/, ''))
+        } else {
+          setError('No legal propositions with citations found in the document')
+        }
       }
     } catch (err: any) {
+      console.error('Extraction error:', err)
       setError(err.message || 'Failed to extract claims from document')
     } finally {
       setIsExtracting(false)
+      setProcessingStatus('')
     }
   }
 
@@ -270,6 +335,7 @@ function App() {
     setIsLoading(true)
     setError(null)
     setReport(null)
+    setProcessingStatus('')
 
     const validClaims = claims.filter(c => c.text.trim() && c.citations.some(cit => cit.raw.trim()))
     
@@ -280,30 +346,162 @@ function App() {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/audit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: jobTitle || 'Citation Audit',
-          claims: validClaims.map((c, i) => ({
-            claim_id: `claim_${i + 1}`,
-            text: c.text,
-            citations: c.citations.filter(cit => cit.raw.trim())
-          })),
-          web_search_enabled: webSearchEnabled
+      if (privacyMode) {
+        // CLIENT-SIDE AUDIT MODE
+        // Only send citation strings to server for resolution
+        // Verification happens locally in the browser
+        
+        // Collect all unique citations
+        const allCitations = new Set<string>()
+        validClaims.forEach(claim => {
+          claim.citations.forEach(cit => {
+            if (cit.raw.trim()) {
+              allCitations.add(cit.raw.trim())
+            }
+          })
         })
-      })
+        
+        setProcessingStatus(`Resolving ${allCitations.size} citation(s)...`)
+        
+        // Send only citation strings to server for resolution
+        const resolveResponse = await resolveCitations(
+          Array.from(allCitations),
+          webSearchEnabled
+        )
+        
+        // Build a map of resolved citations
+        const resolvedMap = new Map<string, typeof resolveResponse.resolved[0]>()
+        resolveResponse.resolved.forEach(r => {
+          resolvedMap.set(r.citation.toLowerCase(), r)
+        })
+        
+        setProcessingStatus('Verifying claims locally...')
+        
+        // Now verify each claim locally
+        const auditResults: VerificationResult[] = []
+        
+        for (const claim of validClaims) {
+          const citationResults: VerificationResult['citations'] = []
+          
+          for (const citation of claim.citations) {
+            const citText = citation.raw.trim()
+            if (!citText) continue
+            
+            const resolved = resolvedMap.get(citText.toLowerCase())
+            
+            if (resolved && resolved.source_type !== 'not_found') {
+              // Case found - verify locally
+              const matches = findMatchingParagraphs(
+                claim.text,
+                resolved.paragraphs.map(p => ({
+                  para_num: p.para_num,
+                  text: p.text,
+                  speaker: p.speaker || undefined
+                }))
+              )
+              
+              const { score, level } = calculateConfidence(matches, true)
+              const outcome = determineOutcome(
+                true,
+                matches,
+                resolved.source_type as 'fcl' | 'bailii' | 'web_search' | 'not_found'
+              )
+              
+              citationResults.push({
+                citation_id: citText,
+                citation_text: citText,
+                case_name: resolved.case_name,
+                outcome,
+                source_type: resolved.source_type as 'fcl' | 'bailii' | 'web_search' | 'not_found',
+                verification_level: resolved.source_type === 'web_search' ? 'secondary' : 'primary',
+                authority_url: resolved.url,
+                authority_title: resolved.title,
+                case_retrieved: true,
+                confidence: Math.round(score * 100),
+                notes: matches.length > 0 
+                  ? `Found ${matches.length} matching paragraph(s)` 
+                  : 'No strong keyword matches found',
+                matching_paragraphs: matches.map(m => ({
+                  para_num: m.para_num,
+                  text: m.text.slice(0, 300) + (m.text.length > 300 ? '...' : ''),
+                  similarity_score: m.similarity_score,
+                  match_type: m.match_type
+                }))
+              })
+            } else {
+              // Case not found
+              citationResults.push({
+                citation_id: citText,
+                citation_text: citText,
+                case_name: resolved?.case_name || null,
+                outcome: 'unverifiable',
+                source_type: 'not_found',
+                verification_level: 'unverified',
+                case_retrieved: false,
+                confidence: 0,
+                notes: resolved?.error || 'Citation could not be resolved',
+                matching_paragraphs: []
+              })
+            }
+          }
+          
+          auditResults.push({
+            claim_id: claim.id,
+            text: claim.text,
+            citations: citationResults
+          })
+        }
+        
+        // Build the report
+        const jobId = `client_${Date.now().toString(16)}`
+        const totalCitations = auditResults.reduce((sum, r) => sum + r.citations.length, 0)
+        
+        setReport({
+          audit_metadata: {
+            job_id: jobId,
+            title: jobTitle || 'Citation Audit (Privacy Mode)',
+            audited_at: new Date().toISOString()
+          },
+          claims: auditResults,
+          summary: {
+            total_claims: auditResults.length,
+            total_citations: totalCitations
+          }
+        })
+        
+        setProcessingStatus('')
+        
+      } else {
+        // LEGACY SERVER-SIDE MODE
+        setProcessingStatus('Processing on server...')
+        
+        const response = await fetch('http://localhost:8000/api/audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: jobTitle || 'Citation Audit',
+            claims: validClaims.map((c, i) => ({
+              claim_id: `claim_${i + 1}`,
+              text: c.text,
+              citations: c.citations.filter(cit => cit.raw.trim())
+            })),
+            web_search_enabled: webSearchEnabled
+          })
+        })
 
-      if (!response.ok) {
-        throw new Error('Audit failed')
+        if (!response.ok) {
+          throw new Error('Audit failed')
+        }
+
+        const data = await response.json()
+        setReport(data)
       }
-
-      const data = await response.json()
-      setReport(data)
     } catch (err) {
+      console.error('Audit error:', err)
       setError('Failed to run audit. Make sure the backend is running.')
     } finally {
       setIsLoading(false)
+      setProcessingStatus('')
     }
   }
 
@@ -820,6 +1018,27 @@ function App() {
                 </AnimatePresence>
               </div>
 
+              {/* Privacy Mode Toggle */}
+              <div className="search-settings privacy-settings">
+                <label className="consent-toggle">
+                  <input 
+                    type="checkbox" 
+                    checked={privacyMode}
+                    onChange={(e) => setPrivacyMode(e.target.checked)}
+                  />
+                  <span className={`toggle-switch ${privacyMode ? 'privacy-on' : ''}`}></span>
+                  <span className="toggle-label">
+                    {privacyMode ? <ShieldCheck size={16} /> : <Shield size={16} />}
+                    Privacy mode {privacyMode ? 'ON' : 'OFF'}
+                  </span>
+                </label>
+                <p className={`consent-description ${privacyMode ? 'privacy-enabled' : 'privacy-disabled'}`}>
+                  {privacyMode 
+                    ? '✓ Document parsing happens locally in your browser. Only citation strings are sent to the server for resolution.'
+                    : '⚠ Document will be sent to server for processing (not stored).'}
+                </p>
+              </div>
+
               {/* Web Search Consent */}
               <div className="search-settings">
                 <label className="consent-toggle">
@@ -842,6 +1061,14 @@ function App() {
                   </p>
                 )}
               </div>
+              
+              {/* Processing status */}
+              {processingStatus && (
+                <div className="processing-status">
+                  <Loader2 size={16} className="spinning" />
+                  <span>{processingStatus}</span>
+                </div>
+              )}
 
               <div className="actions-row">
                 <button className="btn-secondary" onClick={addClaim}>
@@ -1030,7 +1257,7 @@ function App() {
                                   </span>
                                   {cit.confidence !== null && cit.confidence !== undefined && (
                                     <span className="confidence-badge">
-                                      {Math.round(cit.confidence * 100)}% match
+                                      {cit.confidence}% match
                                     </span>
                                   )}
                                   {cit.hallucination_type && cit.hallucination_type !== 'review' && cit.outcome !== 'supported' && (

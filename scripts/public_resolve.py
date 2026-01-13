@@ -598,6 +598,7 @@ def resolve_citation_to_urls(
     case_name: Optional[str] = None,
     prefer_sources: List[str] = None,
     job_id: Optional[str] = None,
+    enable_web_search: bool = False,
 ) -> Dict[str, Any]:
     """
     Resolve citation to candidate URLs using multiple strategies.
