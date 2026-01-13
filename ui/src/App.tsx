@@ -487,6 +487,37 @@ function App() {
               <h2>How It Works</h2>
               
               <div className="info-grid">
+                <div className="info-card featured">
+                  <h3>⚖️ About Matthew Lee's Hallucination Taxonomy</h3>
+                  <p>
+                    This tool is inspired by the work of <strong>Matthew Lee</strong>, a barrister (England & Wales) 
+                    who has extensively documented and categorised AI-generated citation errors in legal proceedings.
+                  </p>
+                  <p>
+                    Through his blog <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">Natural and Artificial Intelligence in Law</a>, 
+                    Matthew has tracked over <strong>30 UK cases</strong> involving hallucinated citations — cases where AI tools 
+                    have generated fabricated authorities, incorrect citations, or misstated legal principles.
+                  </p>
+                  <p>
+                    His <strong>8 Hallucination Categories</strong> provide a systematic framework for classifying these errors:
+                  </p>
+                  <ol className="lee-categories-list">
+                    <li><strong>Type 1:</strong> Fabricated Case & Citation — completely invented</li>
+                    <li><strong>Type 2:</strong> Wrong Case Name, Right Citation</li>
+                    <li><strong>Type 3:</strong> Right Case Name, Wrong Citation</li>
+                    <li><strong>Type 4:</strong> Conflated Authorities — merging multiple cases</li>
+                    <li><strong>Type 5:</strong> Correct Law, Invented Authority</li>
+                    <li><strong>Type 6:</strong> Real Case, Misstated Facts/Ratio</li>
+                    <li><strong>Type 7:</strong> Misleading Secondary Paraphrase</li>
+                    <li><strong>Type 8:</strong> False Citations Citing False</li>
+                  </ol>
+                  <p className="blog-link">
+                    <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">
+                      Visit Matthew Lee's Blog →
+                    </a>
+                  </p>
+                </div>
+
                 <div className="info-card">
                   <h3>🔍 What This Tool Does</h3>
                   <p>

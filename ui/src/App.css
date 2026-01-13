@@ -1117,6 +1117,12 @@ html, body {
   padding: 1.25rem;
 }
 
+.info-card.featured {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(212, 168, 85, 0.1) 0%, var(--color-bg-input) 100%);
+  border-color: var(--border-accent);
+}
+
 .info-card h3 {
   font-family: var(--font-body);
   font-size: 1rem;
@@ -1126,6 +1132,11 @@ html, body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.info-card.featured h3 {
+  color: var(--color-accent);
+  font-size: 1.1rem;
 }
 
 .info-card p {
@@ -1197,6 +1208,63 @@ html, body {
   justify-content: center;
   font-size: 0.75rem;
   font-weight: 700;
+}
+
+.lee-categories-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.5rem;
+  list-style: none !important;
+  padding: 0 !important;
+  margin: 1rem 0 !important;
+}
+
+.lee-categories-list li {
+  padding: 0.5rem 0.75rem !important;
+  padding-left: 0.75rem !important;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem !important;
+  border-left: 3px solid var(--color-accent);
+}
+
+.lee-categories-list li::before {
+  display: none !important;
+}
+
+.lee-categories-list li strong {
+  color: var(--color-accent-light);
+}
+
+.blog-link {
+  margin-top: 1rem !important;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.blog-link a {
+  color: var(--color-accent);
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: color 0.2s ease;
+}
+
+.blog-link a:hover {
+  color: var(--color-accent-light);
+  text-decoration: underline;
+}
+
+.info-card a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.info-card a:hover {
+  color: var(--color-accent-light);
 }
 
 .warning-note {
