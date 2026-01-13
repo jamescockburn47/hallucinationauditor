@@ -1,0 +1,19 @@
+Analysis of Informed Consent Requirements in UK Medical Law
+
+The landmark case of Montgomery v Lanarkshire Health Board [2015] UKSC 11 established important principles regarding informed consent in medical treatment.
+
+The Supreme Court held that doctors have a duty to inform patients of material risks associated with proposed treatments. This duty extends beyond what a responsible body of medical practitioners might consider appropriate disclosure.
+
+Key Points from Montgomery:
+
+1. The Supreme Court ruled that informed consent requires doctors to disclose material risks to patients, enabling them to make informed decisions about their treatment.
+
+2. The case involved a diabetic mother who was not informed about the risk of shoulder dystocia during vaginal delivery, which resulted in serious injuries to her child.
+
+3. The Court rejected the Bolam test for informed consent, instead adopting a patient-centered approach that focuses on what a reasonable person in the patient's position would want to know.
+
+4. Justice Kerr emphasized that the therapeutic exception (withholding information for the patient's benefit) should be narrowly construed and only applied in exceptional circumstances.
+
+This decision represents a significant shift in UK medical law, moving from a paternalistic model to one that respects patient autonomy and the right to make informed choices about medical treatment.
+
+The Montgomery judgment cited earlier authority including Sidaway v Board of Governors [1985] AC 871 and drew on comparative jurisprudence from other common law jurisdictions.

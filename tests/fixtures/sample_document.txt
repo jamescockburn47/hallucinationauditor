@@ -1,0 +1,20 @@
+Sample Legal Document for Testing
+==================================
+
+This is a test document containing legal citations for the hallucination auditor system.
+
+Paragraph 1: Introduction
+-------------------------
+This document discusses the legal principles established in recent case law regarding informed consent in medical treatment.
+
+Paragraph 5: The Montgomery Principle
+--------------------------------------
+The Supreme Court in Montgomery v Lanarkshire [2015] UKSC 11 held that informed consent requires full disclosure of material risks to the patient.
+
+Paragraph 7: Material Risks
+----------------------------
+At paragraph [42], the court stated that the duty extends to all material risks that a reasonable person in the patient's position would consider significant.
+
+Paragraph 10: Conclusion
+-------------------------
+The Montgomery v Lanarkshire [2015] UKSC 11 judgment represents a significant shift in the law of informed consent.

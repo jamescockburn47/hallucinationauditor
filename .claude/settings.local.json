@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python scripts/extract_text.py:*)",
+      "Bash(chcp:*)",
+      "Bash(python scripts/orchestrate.py:*)",
+      "Bash(find:*)",
+      "Bash(for f in *.py)",
+      "Bash(do sed -i 's/✓/[OK]/g; s/✗/[ERROR]/g; s/⚠/[WARN]/g; s/⏳/[WAIT]/g' \"$f\")",
+      "Bash(done)",
+      "Bash(python -m json.tool:*)",
+      "Bash(python scripts/public_resolve.py:*)",
+      "Bash(python scripts/fcl_get_xml.py:*)",
+      "Bash(python scripts/parse_fcl_xml.py:*)",
+      "Bash(python scripts/parse_authority.py:*)"
+    ]
+  }
+}

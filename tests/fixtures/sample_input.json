@@ -1,0 +1,47 @@
+{
+  "job_id": "fixture_001",
+  "title": "Test Fixture Audit Job",
+  "documents": [
+    {
+      "doc_id": "doc_1",
+      "path": "tests/fixtures/sample_document.txt",
+      "type": "txt",
+      "notes": "Simple text document for testing"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim_1",
+      "text": "The Supreme Court held that informed consent requires full disclosure",
+      "source_doc_id": "doc_1",
+      "source_locator": "paragraph 5",
+      "citations": [
+        {
+          "raw": "Montgomery v Lanarkshire [2015] UKSC 11",
+          "normalized": "[2015] UKSC 11",
+          "kind": "neutral"
+        }
+      ]
+    },
+    {
+      "claim_id": "claim_2",
+      "text": "At paragraph [42], the court stated that the duty extends to all material risks",
+      "source_doc_id": "doc_1",
+      "source_locator": "paragraph 7",
+      "citations": [
+        {
+          "raw": "Montgomery v Lanarkshire [2015] UKSC 11",
+          "kind": "neutral"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "public_sources_only": true,
+    "max_fetch_per_job": 50,
+    "fetch_timeout_seconds": 20,
+    "rate_limit_seconds": 1.0,
+    "prefer_sources": ["bailii"],
+    "allow_find_case_law_url_fetch_only": true
+  }
+}

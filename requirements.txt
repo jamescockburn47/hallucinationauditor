@@ -1,0 +1,13 @@
+# Core dependencies
+PyMuPDF==1.23.8
+beautifulsoup4==4.12.2
+requests==2.31.0
+lxml==4.9.3
+python-dateutil==2.8.2
+jsonschema==4.20.0
+
+# API dependencies
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+python-multipart==0.0.6
