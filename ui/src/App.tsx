@@ -731,34 +731,83 @@ function App() {
                   </p>
                 </div>
 
-                <div className="info-card">
-                  <h3>🔒 Privacy & Security</h3>
+                <div className="info-card privacy-card">
+                  <h3>🔒 Privacy Options</h3>
                   <p>
-                    This tool is available in two modes with different privacy characteristics:
+                    Choose how you want to use this tool based on your privacy requirements:
                   </p>
-                  <div className="privacy-modes">
-                    <div className="privacy-mode local">
-                      <strong>🖥️ Local Download (Maximum Privacy)</strong>
+                  <div className="privacy-options-grid">
+                    <div className="privacy-option option-local">
+                      <div className="option-header">
+                        <span className="option-badge best">⭐ MOST PRIVATE</span>
+                        <h4>🖥️ Fully Local</h4>
+                      </div>
+                      <p className="option-description">Download and run entirely on your machine. Nothing leaves your computer except citation lookups to FCL/BAILII.</p>
                       <ul>
-                        <li>All processing happens on your machine</li>
-                        <li>Documents never leave your computer</li>
-                        <li>Only citation lookups go to FCL/BAILII</li>
-                        <li><a href="https://github.com/jamescockburn47/hallucinationauditor" target="_blank" rel="noopener noreferrer">Download from GitHub →</a></li>
+                        <li>✓ All document processing on your machine</li>
+                        <li>✓ No data sent to any server</li>
+                        <li>✓ Works offline (except case lookups)</li>
+                        <li>✓ Suitable for privileged documents</li>
                       </ul>
+                      <a 
+                        href="https://github.com/jamescockburn47/hallucinationauditor/releases" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="option-btn primary"
+                      >
+                        Download Desktop App →
+                      </a>
                     </div>
-                    <div className="privacy-mode online">
-                      <strong>🌐 Online Version</strong>
+
+                    <div className="privacy-option option-hybrid">
+                      <div className="option-header">
+                        <span className="option-badge good">✓ PRIVATE</span>
+                        <h4>🔀 Hybrid Mode</h4>
+                      </div>
+                      <p className="option-description">Document parsing happens in your browser. Only extracted citation strings are sent to the server for resolution.</p>
                       <ul>
-                        <li>Document parsing happens in your browser</li>
-                        <li>Only extracted citations are sent to the server</li>
-                        <li>Full document content stays client-side</li>
-                        <li>No documents are stored on any server</li>
+                        <li>✓ Documents parsed locally in browser</li>
+                        <li>✓ Only citations sent to server</li>
+                        <li>✓ No document storage</li>
+                        <li>✓ Suitable for most documents</li>
                       </ul>
+                      <button 
+                        className="option-btn secondary"
+                        onClick={() => {
+                          setPrivacyMode(true)
+                          setActiveTab('audit')
+                        }}
+                      >
+                        Use Hybrid Mode →
+                      </button>
+                    </div>
+
+                    <div className="privacy-option option-online">
+                      <div className="option-header">
+                        <span className="option-badge caution">⚠ NOT PRIVATE</span>
+                        <h4>☁️ Fully Online</h4>
+                      </div>
+                      <p className="option-description">Document is uploaded and processed on the server. Faster but not suitable for confidential materials.</p>
+                      <ul>
+                        <li>⚠ Document sent to server</li>
+                        <li>✓ Documents NOT stored</li>
+                        <li>✓ Faster processing</li>
+                        <li className="warning-item">⛔ Do NOT use for privileged documents</li>
+                      </ul>
+                      <button 
+                        className="option-btn tertiary"
+                        onClick={() => {
+                          setPrivacyMode(false)
+                          setActiveTab('audit')
+                        }}
+                      >
+                        Use Online Mode →
+                      </button>
                     </div>
                   </div>
                   <p className="warning-note">
                     <AlertCircle size={14} />
-                    <strong>Web Search:</strong> If enabled, citation text is sent to external search engines. 
+                    <strong>Web Search Fallback:</strong> If enabled, citation text may be sent to external search engines. 
                     This is opt-in and requires your explicit consent.
                   </p>
                 </div>
@@ -799,29 +848,49 @@ function App() {
               </div>
 
               <div className="info-card get-started-card">
-                <h3>🚀 Get Started</h3>
-                <div className="get-started-options">
-                  <div className="get-started-option">
-                    <h4>Use Online</h4>
-                    <p>Start using the tool right now in your browser. Documents are parsed client-side for privacy.</p>
-                    <button 
+                <h3>🚀 Quick Start</h3>
+                <p className="get-started-intro">Choose the option that best fits your privacy requirements:</p>
+                <div className="get-started-options three-col">
+                  <div className="get-started-option highlight">
+                    <span className="quick-badge best">⭐ Recommended</span>
+                    <h4>🖥️ Desktop App</h4>
+                    <p>Maximum privacy. Download and run locally on Windows.</p>
+                    <a 
+                      href="https://github.com/jamescockburn47/hallucinationauditor/releases" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
                       className="get-started-btn primary"
-                      onClick={() => setActiveTab('audit')}
                     >
-                      Start Auditing →
+                      Download .exe →
+                    </a>
+                  </div>
+                  <div className="get-started-option">
+                    <span className="quick-badge good">✓ Private</span>
+                    <h4>🔀 Hybrid Mode</h4>
+                    <p>Documents parsed in browser. Only citations sent to server.</p>
+                    <button 
+                      className="get-started-btn secondary"
+                      onClick={() => {
+                        setPrivacyMode(true)
+                        setActiveTab('audit')
+                      }}
+                    >
+                      Start (Hybrid) →
                     </button>
                   </div>
                   <div className="get-started-option">
-                    <h4>Download Locally</h4>
-                    <p>For maximum privacy, run the tool entirely on your own machine.</p>
-                    <a 
-                      href="https://github.com/jamescockburn47/hallucinationauditor" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="get-started-btn secondary"
+                    <span className="quick-badge caution">⚠ Not Private</span>
+                    <h4>☁️ Online Mode</h4>
+                    <p>Fastest. Do NOT use for privileged documents.</p>
+                    <button 
+                      className="get-started-btn tertiary"
+                      onClick={() => {
+                        setPrivacyMode(false)
+                        setActiveTab('audit')
+                      }}
                     >
-                      View on GitHub →
-                    </a>
+                      Start (Online) →
+                    </button>
                   </div>
                 </div>
               </div>
