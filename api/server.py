@@ -328,6 +328,22 @@ def extract_case_name_from_text(text: str, citation: str) -> Optional[str]:
         logger.debug(f"Extracted case name '{case_name}' from citation text")
         return case_name
     
+    # ALSO check if case name is at the START of the text
+    # This handles claim text like "Caparo Industries plc v Dickman — establishes..."
+    text_start = text[:200].strip()
+    start_patterns = [
+        r"^([A-Z][A-Za-z'\-\.]+(?:\s+(?:Industries|Holdings|International|Services|Financial|Compliance|Group|Limited|Ltd|plc|PLC|Authority|Bank|Council|Commissioners?))*)\s+v\.?\s+([A-Z][A-Za-z'\-\.]+(?:\s+(?:Industries|Holdings|International|Services|Financial|Group|Limited|Ltd|plc|PLC|Authority|Bank))*)",
+        r"^(R|Regina|Rex)\s+v\.?\s+([A-Z][A-Za-z'\-\.]+(?:\s+[A-Za-z'\-\.]+)*)",
+    ]
+    for pattern in start_patterns:
+        match = re.match(pattern, text_start)
+        if match:
+            case_name = match.group(0).strip()
+            case_name = re.sub(r'[\s—\-–]+$', '', case_name).strip()
+            if len(case_name) > 5:
+                logger.info(f"Extracted case name '{case_name}' from text start")
+                return case_name
+    
     return None
 
 
