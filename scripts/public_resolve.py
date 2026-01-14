@@ -209,6 +209,47 @@ def try_neutral_citation_patterns(citation_text: str) -> Optional[Dict[str, Any]
     return None
 
 
+def verify_url_exists(url: str, timeout: int = 10) -> bool:
+    """
+    Check if a URL exists (returns 200).
+    
+    Used to verify that constructed URLs from neutral citations actually exist.
+    
+    Args:
+        url: URL to verify
+        timeout: Request timeout in seconds
+        
+    Returns:
+        True if URL returns 200, False otherwise
+    """
+    if requests is None:
+        logger.warning("requests library not installed, cannot verify URL")
+        return False
+    try:
+        # Try HEAD first (faster, less bandwidth)
+        response = requests.head(
+            url, 
+            timeout=timeout, 
+            allow_redirects=True,
+            headers={"User-Agent": "HallucinationAuditor/0.3.0"}
+        )
+        if response.status_code == 200:
+            return True
+        # Some servers don't support HEAD, try GET with stream
+        if response.status_code in (405, 501):
+            response = requests.get(
+                url, 
+                timeout=timeout, 
+                stream=True,
+                headers={"User-Agent": "HallucinationAuditor/0.3.0"}
+            )
+            return response.status_code == 200
+        return False
+    except Exception as e:
+        logger.debug(f"URL verification failed for {url}: {e}")
+        return False
+
+
 def is_traditional_citation(citation_text: str) -> bool:
     """Check if this is a traditional law report citation."""
     for pattern in TRADITIONAL_REPORT_PATTERNS:
@@ -232,72 +273,78 @@ def search_fcl_by_query(query: str, timeout: int = 30) -> List[Dict[str, Any]]:
         logger.warning("requests library not installed, cannot search FCL")
         return []
     
+    all_results = []
+    seen_uris = set()
+    
     try:
         # FCL Atom search endpoint
         url = "https://caselaw.nationalarchives.gov.uk/atom.xml"
         
-        # Build params - use party search for better results
-        params = {
-            "party": query,  # Use party parameter instead of query
-            "per_page": 10,
-            "order": "-date",
-        }
+        # Try multiple search strategies for better coverage
+        search_strategies = [
+            {"party": query, "per_page": 10, "order": "-date"},   # Party name search
+            {"query": query, "per_page": 10, "order": "-date"},   # Full-text query search
+        ]
         
-        logger.debug(f"FCL Atom request: {url} params={params}")
-        
-        response = requests.get(
-            url,
-            params=params,
-            timeout=timeout,
-            headers={"User-Agent": "HallucinationAuditor/0.3.0"}
-        )
-        
-        logger.debug(f"FCL response status: {response.status_code}")
-        
-        if response.status_code != 200:
-            logger.warning(f"FCL search returned {response.status_code}")
-            # Try alternative search with query param
-            params = {"query": query, "per_page": 10}
-            response = requests.get(url, params=params, timeout=timeout,
-                                   headers={"User-Agent": "HallucinationAuditor/0.3.0"})
-            if response.status_code != 200:
-                logger.warning(f"FCL fallback search also returned {response.status_code}")
-                return []
-        
-        # Parse Atom XML
-        import xml.etree.ElementTree as ET
-        root = ET.fromstring(response.content)
-        
-        ns = {
-            "atom": "http://www.w3.org/2005/Atom",
-            "tna": "https://caselaw.nationalarchives.gov.uk/akn",
-        }
-        
-        results = []
-        for entry in root.findall("atom:entry", ns):
-            title_elem = entry.find("atom:title", ns)
-            uri_elem = entry.find("tna:uri", ns)
+        for params in search_strategies:
+            logger.debug(f"FCL Atom request: {url} params={params}")
             
-            # Get XML link
-            xml_link = None
-            for link in entry.findall("atom:link", ns):
-                if "xml" in link.get("type", ""):
-                    xml_link = link.get("href")
-                    break
-            
-            if title_elem is not None and uri_elem is not None:
-                results.append({
-                    "title": title_elem.text,
-                    "uri": uri_elem.text,
-                    "url": xml_link or f"https://caselaw.nationalarchives.gov.uk/{uri_elem.text}/data.xml",
-                })
+            try:
+                response = requests.get(
+                    url,
+                    params=params,
+                    timeout=timeout,
+                    headers={"User-Agent": "HallucinationAuditor/0.3.0"}
+                )
+                
+                logger.debug(f"FCL response status: {response.status_code}")
+                
+                if response.status_code != 200:
+                    logger.warning(f"FCL search returned {response.status_code} for params={params}")
+                    continue
+                
+                # Parse Atom XML
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(response.content)
+                
+                ns = {
+                    "atom": "http://www.w3.org/2005/Atom",
+                    "tna": "https://caselaw.nationalarchives.gov.uk/akn",
+                }
+                
+                for entry in root.findall("atom:entry", ns):
+                    title_elem = entry.find("atom:title", ns)
+                    uri_elem = entry.find("tna:uri", ns)
+                    
+                    # Skip duplicates from different search strategies
+                    if uri_elem is not None and uri_elem.text in seen_uris:
+                        continue
+                    
+                    # Get XML link
+                    xml_link = None
+                    for link in entry.findall("atom:link", ns):
+                        if "xml" in link.get("type", ""):
+                            xml_link = link.get("href")
+                            break
+                    
+                    if title_elem is not None and uri_elem is not None:
+                        seen_uris.add(uri_elem.text)
+                        all_results.append({
+                            "title": title_elem.text,
+                            "uri": uri_elem.text,
+                            "url": xml_link or f"https://caselaw.nationalarchives.gov.uk/{uri_elem.text}/data.xml",
+                        })
+                        
+            except Exception as e:
+                logger.warning(f"FCL search strategy failed: {e}")
+                continue
         
-        logger.info(f"FCL search found {len(results)} results")
-        return results
+        logger.info(f"FCL search found {len(all_results)} results across all strategies")
+        return all_results
         
     except Exception as e:
         logger.error(f"FCL search error: {e}")
-        return []
+        return all_results
 
 
 def try_bailii_direct_url(case_name: str, year: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
@@ -490,6 +537,78 @@ def search_bailii(query: str, year: Optional[str] = None, case_name: Optional[st
         return results
 
 
+def search_by_case_name(case_name: str, year: Optional[str] = None, timeout: int = 30) -> List[Dict[str, Any]]:
+    """
+    Search FCL and BAILII using the full case name.
+    
+    This is the fallback when citation-based URL construction fails.
+    Uses the complete case name for better search matching.
+    
+    Args:
+        case_name: Full case name (e.g., "Caparo Industries plc v Dickman")
+        year: Optional year filter
+        timeout: Request timeout
+        
+    Returns:
+        List of candidate matches
+    """
+    candidates = []
+    
+    if not case_name:
+        return candidates
+    
+    logger.info(f"Searching by case name: '{case_name}' year={year}")
+    
+    # Strategy 1: FCL search with full case name
+    fcl_results = search_fcl_by_query(case_name, timeout)
+    for result in fcl_results:
+        result_title = result.get("title", "")
+        result_uri = result.get("uri", "")
+        
+        # Calculate confidence based on matches
+        confidence = 0.75
+        
+        # Check year match if provided
+        if year:
+            year_match = year in result_uri or year in result_title
+            if not year_match:
+                confidence = 0.60  # Lower confidence without year match
+        
+        # Check if case name appears in title (partial match)
+        name_parts = case_name.lower().split()
+        significant_parts = [p for p in name_parts if len(p) > 2 and p not in ['the', 'and', 'plc', 'ltd', 'v', 'v.']]
+        matches = sum(1 for part in significant_parts if part in result_title.lower())
+        if matches >= 2:
+            confidence = min(confidence + 0.10, 0.90)
+        
+        candidates.append({
+            "url": result.get("url"),
+            "source": "find_case_law",
+            "confidence": confidence,
+            "resolution_method": "fcl_name_search",
+            "title": result_title,
+            "uri": result_uri,
+        })
+    
+    # Strategy 2: BAILII search if FCL didn't find good results
+    if not candidates or (candidates and candidates[0].get("confidence", 0) < 0.75):
+        logger.info(f"Trying BAILII search for case name: {case_name}")
+        bailii_results = search_bailii(case_name, year, case_name=case_name, timeout=timeout)
+        for result in bailii_results:
+            candidates.append({
+                "url": result.get("url"),
+                "source": "bailii",
+                "confidence": result.get("confidence", 0.70),
+                "resolution_method": "bailii_name_search",
+                "title": result.get("title"),
+            })
+    
+    # Sort by confidence
+    candidates.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+    
+    return candidates
+
+
 def resolve_traditional_citation(citation_text: str, case_name: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Resolve traditional law report citation using search.
@@ -632,11 +751,32 @@ def resolve_citation_to_urls(
     # Strategy 1: Try neutral citation direct URL construction
     neutral_result = try_neutral_citation_patterns(citation_text)
     if neutral_result:
-        candidate_urls.append(neutral_result)
-        resolution_attempts.append(f"Neutral citation matched: {neutral_result['pattern_name']}")
-        logger.info(f"Resolved via neutral citation: {neutral_result['url']}")
+        # VERIFY the URL actually exists before accepting it
+        logger.info(f"Verifying neutral citation URL: {neutral_result['url']}")
+        if verify_url_exists(neutral_result['url']):
+            candidate_urls.append(neutral_result)
+            resolution_attempts.append(f"Neutral citation verified: {neutral_result['pattern_name']}")
+            logger.info(f"Resolved via neutral citation: {neutral_result['url']}")
+        else:
+            # URL doesn't exist - will fall back to case name search
+            resolution_attempts.append(f"Neutral citation URL not found (404) - falling back to case name search")
+            logger.warning(f"Neutral citation URL not found: {neutral_result['url']}")
     
-    # Strategy 2: If traditional citation or neutral didn't match, use search
+    # Strategy 2: If neutral citation failed or didn't match, try case name search
+    if not candidate_urls and case_name:
+        resolution_attempts.append(f"Using case name search for: {case_name}")
+        year = extract_citation_year(citation_text)
+        name_candidates = search_by_case_name(case_name, year)
+        
+        for candidate in name_candidates:
+            existing_urls = [c.get("url") for c in candidate_urls]
+            if candidate.get("url") not in existing_urls:
+                candidate_urls.append(candidate)
+        
+        if name_candidates:
+            resolution_attempts.append(f"Case name search found {len(name_candidates)} candidate(s)")
+    
+    # Strategy 3: If traditional citation or still no results, use traditional resolution
     if not candidate_urls or is_traditional_citation(citation_text):
         if is_traditional_citation(citation_text):
             resolution_attempts.append("Traditional law report citation detected - using search")
@@ -650,7 +790,7 @@ def resolve_citation_to_urls(
                 candidate_urls.append(candidate)
         
         if traditional_candidates:
-            resolution_attempts.append(f"Search found {len(traditional_candidates)} candidate(s)")
+            resolution_attempts.append(f"Traditional search found {len(traditional_candidates)} candidate(s)")
     
     # Determine resolution status
     if len(candidate_urls) == 0:
