@@ -171,6 +171,10 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         if not AUTH_ENABLED:
             return await call_next(request)
 
+        # Allow health check without auth (needed for Railway/container health checks)
+        if request.url.path == "/health":
+            return await call_next(request)
+
         # Allow static assets without auth (they're loaded after initial page auth)
         if request.url.path.startswith("/assets/"):
             return await call_next(request)
