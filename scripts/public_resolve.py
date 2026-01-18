@@ -610,15 +610,21 @@ def try_bailii_citation_finder(citation_text: str, timeout: int = 30) -> Optiona
         else:
             clean_citation = citation_text
 
-        params = {"citation": clean_citation}
-
         logger.debug(f"BAILII citation finder: {clean_citation}")
+
+        # Use form-urlencoded data with explicit Content-Type header
+        # This ensures Content-Length is properly calculated
+        from urllib.parse import urlencode
+        form_data = urlencode({"citation": clean_citation})
 
         response = requests.post(
             url,
-            data=params,
+            data=form_data,
             timeout=timeout,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
             allow_redirects=True
         )
 
@@ -713,11 +719,18 @@ def search_bailii(query: str, year: Optional[str] = None, case_name: Optional[st
 
         logger.debug(f"BAILII search: {search_url} titleall={query}")
 
+        # Use form-urlencoded with explicit Content-Type to avoid HTTP 411 errors
+        from urllib.parse import urlencode
+        form_data = urlencode(search_data)
+
         response = requests.post(
             search_url,
-            data=search_data,
+            data=form_data,
             timeout=timeout,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"}
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+                "Content-Type": "application/x-www-form-urlencoded",
+            }
         )
         
         if response.status_code != 200:
