@@ -24,9 +24,9 @@ import './App.css'
 
 // Client-side processing for privacy mode
 import { extractTextFromFile } from './lib/documentParser'
-import { extractCitations, extractPropositions, formatCitation, type ExtractedCitation } from './lib/citationExtractor'
+import { extractCitations, extractPropositions, formatCitation } from './lib/citationExtractor'
 import { findMatchingParagraphs, calculateConfidence, determineOutcome } from './lib/verifier'
-import { resolveCitations, type ResolvedCitation } from './lib/api'
+import { resolveCitations } from './lib/api'
 
 interface Citation {
   raw: string
