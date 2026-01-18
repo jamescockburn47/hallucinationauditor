@@ -172,8 +172,17 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Allow health check without auth (needed for Railway/container health checks)
+        # Railway checks "/" by default - detect health checks by User-Agent or path
         if request.url.path == "/health":
             return await call_next(request)
+
+        # Allow root path for health checks (no User-Agent or simple health check agents)
+        if request.url.path == "/":
+            user_agent = request.headers.get("User-Agent", "")
+            # Health checks typically have no User-Agent or simple ones like "curl", "Go-http-client", etc.
+            # Real browsers have complex User-Agent strings
+            if not user_agent or "Mozilla" not in user_agent:
+                return await call_next(request)
 
         # Allow static assets without auth (they're loaded after initial page auth)
         if request.url.path.startswith("/assets/"):
