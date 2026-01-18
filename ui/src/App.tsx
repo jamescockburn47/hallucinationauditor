@@ -23,10 +23,10 @@ import {
 import './App.css'
 
 // Client-side processing for privacy mode
-import { extractTextFromFile, getFileTypeDescription } from './lib/documentParser'
-import { extractCitations, extractPropositions, formatCitation } from './lib/citationExtractor'
+import { extractTextFromFile } from './lib/documentParser'
+import { extractCitations, extractPropositions, formatCitation, type ExtractedCitation } from './lib/citationExtractor'
 import { findMatchingParagraphs, calculateConfidence, determineOutcome } from './lib/verifier'
-import { resolveCitations } from './lib/api'
+import { resolveCitations, type ResolvedCitation } from './lib/api'
 
 interface Citation {
   raw: string
@@ -397,7 +397,7 @@ function App() {
                 }))
               )
               
-              const { score, level } = calculateConfidence(matches, true)
+              const { score } = calculateConfidence(matches, true)
               const outcome = determineOutcome(
                 true,
                 matches,
@@ -582,7 +582,7 @@ function App() {
     }
   }
 
-  const getOutcomeIcon = (outcome: string, caseRetrieved?: boolean) => {
+  const getOutcomeIcon = (outcome: string, _caseRetrieved?: boolean) => {
     switch (outcome) {
       case 'supported':
         return <CheckCircle2 className="outcome-icon supported" />
