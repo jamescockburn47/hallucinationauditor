@@ -1132,17 +1132,7 @@ def run_audit_pipeline(job_id: str, claims: List[ClaimInput], web_search_enabled
     return results
 
 
-# ===== Routes =====
-
-@app.get("/")
-async def root():
-    """Health check endpoint."""
-    return {
-        "name": "Matthew Lee Bot",
-        "status": "online",
-        "version": "0.2.0"
-    }
-
+# ===== API Routes =====
 
 @app.post("/api/audit", response_model=AuditResponse)
 async def run_audit(request: AuditRequest):
