@@ -1,0 +1,15 @@
+# Render.com deployment configuration
+# Deploy at: https://dashboard.render.com/
+
+services:
+  - type: web
+    name: hallucination-auditor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free  # or starter for better performance
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: PYTHONUNBUFFERED
+        value: "1"

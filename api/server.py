@@ -33,6 +33,8 @@ os.chdir(Path(__file__).parent.parent)
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from utils.file_helpers import safe_read_json, safe_write_json
@@ -142,14 +144,46 @@ app = FastAPI(
     version="0.2.0"
 )
 
-# CORS for frontend
+# CORS for frontend - allow all origins in production
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_origins=["*"],  # Allow all origins for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve static frontend files in production
+STATIC_DIR = Path(__file__).parent.parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/")
+    async def serve_frontend():
+        """Serve the frontend index.html."""
+        index_path = STATIC_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+        return {"name": "Matthew Lee Bot API", "status": "online", "version": "0.2.0"}
+
+    @app.get("/{path:path}")
+    async def serve_static(path: str):
+        """Serve static files or fall back to index.html for SPA routing."""
+        # Skip API routes
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        file_path = STATIC_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+
+        # Fall back to index.html for SPA routing
+        index_path = STATIC_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 # ===== Citation Patterns =====

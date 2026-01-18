@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+.mypy_cache
+.pytest_cache
+.ruff_cache
+*.egg-info
+dist
+build
+
+# Node
+ui/node_modules
+ui/.cache
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Cache and reports (will be created fresh)
+cache/
+reports/
+
+# Test files
+tests/
+*.test.py
+*.spec.ts
+
+# Documentation
+*.md
+!README.md
+
+# Development files
+pyproject.toml
+requirements-dev.txt
+.vercelignore
+vercel.json
+
+# Temporary files
+*.tmp
+*.temp
+*.log
