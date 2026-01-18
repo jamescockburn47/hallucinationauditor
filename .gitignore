@@ -10,7 +10,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Python lib directories (but not ui/src/lib which contains our code)
+/lib/
 lib64/
 parts/
 sdist/
