@@ -1306,20 +1306,28 @@ async def resolve_citations_only(request: CitationResolveRequest):
                 try:
                     job_id = f"resolve_{uuid.uuid4().hex[:8]}"
                     cache_dir = ensure_cache_dir(job_id)
-                    
+
+                    logger.info(f"Fetching judgment from: {url}")
+
                     # Fetch the document
                     fetch_result = fetch_and_cache_url(
                         url=url,
                         cache_dir=cache_dir
                     )
-                    
+
+                    logger.info(f"Fetch result: {fetch_result}")
+
                     if fetch_result and fetch_result.get("file_path"):
                         # Parse it
                         parsed = parse_authority_document(
                             fetch_result["file_path"],
                             url=url
                         )
-                        
+
+                        logger.info(f"Parsed result keys: {parsed.keys() if parsed else 'None'}")
+                        if parsed:
+                            logger.info(f"Paragraphs count: {len(parsed.get('paragraphs', []))}")
+
                         if parsed and parsed.get("paragraphs"):
                             # Return simplified paragraphs
                             paragraphs = [
@@ -1331,9 +1339,14 @@ async def resolve_citations_only(request: CitationResolveRequest):
                                 for i, p in enumerate(parsed["paragraphs"])
                                 if p.get("text") and len(p.get("text", "")) > 20
                             ][:100]  # Limit to 100 paragraphs
-                            
+                            logger.info(f"Returning {len(paragraphs)} paragraphs")
+                        else:
+                            logger.warning(f"No paragraphs parsed from {url}")
+                    else:
+                        logger.warning(f"Fetch failed or no file_path for {url}")
+
                 except Exception as e:
-                    logger.warning(f"Error fetching/parsing {url}: {e}")
+                    logger.error(f"Error fetching/parsing {url}: {e}", exc_info=True)
                 
                 resolved_citations.append(ResolvedCitation(
                     citation=citation_text,
@@ -1579,23 +1592,13 @@ HALLUCINATION_KEYWORDS = [
 def extract_paragraphs_with_numbers(text: str) -> List[Tuple[str, str]]:
     """
     Extract paragraphs with their paragraph numbers from judgment text.
-    
+
     Returns list of (paragraph_number, paragraph_text) tuples.
     """
-    # #region agent log
-    with open(r'c:\Users\James\Desktop\hullucintion detector\.cursor\debug.log', 'a') as f:
-        import json; f.write(json.dumps({"location":"server.py:extract_paragraphs","message":"Function called","data":{"textLength":len(text),"textPreview":text[:200]},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","hypothesisId":"H2A"})+'\n')
-    # #endregion
-    
     # Pattern to match paragraph numbers like [1], [2], etc.
     pattern = r'\[(\d+)\]\s*([^\[]+?)(?=\[\d+\]|$)'
     matches = re.findall(pattern, text, re.DOTALL)
-    
-    # #region agent log
-    with open(r'c:\Users\James\Desktop\hullucintion detector\.cursor\debug.log', 'a') as f:
-        import json; f.write(json.dumps({"location":"server.py:extract_paragraphs","message":"Regex matches found","data":{"matchCount":len(matches),"firstFewNums":[m[0] for m in matches[:5]] if matches else [],"usedFallback":not bool(matches)},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","hypothesisId":"H2A"})+'\n')
-    # #endregion
-    
+
     if matches:
         return [(num, text.strip()) for num, text in matches]
     
