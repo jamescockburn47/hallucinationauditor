@@ -10,7 +10,11 @@
 
 // In production (when served from same origin), use empty string for relative URLs
 // In development, use localhost:8000
-const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '' : 'http://localhost:8000');
+// Also check hostname to handle cases where PROD flag isn't reliable
+const isLocalhost = typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+const API_BASE = import.meta.env.VITE_API_URL ?? (isLocalhost ? 'http://localhost:8000' : '');
 
 export interface JudgmentParagraph {
   para_num: string;
