@@ -1311,16 +1311,16 @@ async def resolve_citations_only(request: CitationResolveRequest):
 
                     # Fetch the document
                     fetch_result = fetch_and_cache_url(
-                        url=url,
-                        cache_dir=cache_dir
+                        job_id=job_id,
+                        url=url
                     )
 
                     logger.info(f"Fetch result: {fetch_result}")
 
-                    if fetch_result and fetch_result.get("file_path"):
+                    if fetch_result and fetch_result.get("cache_path"):
                         # Parse it
                         parsed = parse_authority_document(
-                            fetch_result["file_path"],
+                            fetch_result["cache_path"],
                             url=url
                         )
 
@@ -1343,7 +1343,7 @@ async def resolve_citations_only(request: CitationResolveRequest):
                         else:
                             logger.warning(f"No paragraphs parsed from {url}")
                     else:
-                        logger.warning(f"Fetch failed or no file_path for {url}")
+                        logger.warning(f"Fetch failed or no cache_path for {url}: {fetch_result}")
 
                 except Exception as e:
                     logger.error(f"Error fetching/parsing {url}: {e}", exc_info=True)
