@@ -154,36 +154,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static frontend files in production
+# Static directory path for frontend files
 STATIC_DIR = Path(__file__).parent.parent / "static"
-if STATIC_DIR.exists():
+
+# Mount assets directory if it exists (this doesn't conflict with API routes)
+if STATIC_DIR.exists() and (STATIC_DIR / "assets").exists():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-
-    @app.get("/")
-    async def serve_frontend():
-        """Serve the frontend index.html."""
-        index_path = STATIC_DIR / "index.html"
-        if index_path.exists():
-            return FileResponse(index_path)
-        return {"name": "Matthew Lee Bot API", "status": "online", "version": "0.2.0"}
-
-    @app.get("/{path:path}")
-    async def serve_static(path: str):
-        """Serve static files or fall back to index.html for SPA routing."""
-        # Skip API routes
-        if path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
-
-        file_path = STATIC_DIR / path
-        if file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
-
-        # Fall back to index.html for SPA routing
-        index_path = STATIC_DIR / "index.html"
-        if index_path.exists():
-            return FileResponse(index_path)
-
-        raise HTTPException(status_code=404, detail="Not found")
 
 
 # ===== Citation Patterns =====
@@ -1818,6 +1794,43 @@ async def search_commentary(
         "results": results,
         "lee_category_counts": lee_category_counts
     }
+
+
+# ===== Static File Serving (MUST be after all API routes) =====
+# These catch-all routes serve the frontend SPA and must come LAST
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy", "name": "Matthew Lee Bot API", "version": "0.2.0"}
+
+
+if STATIC_DIR.exists():
+    @app.get("/")
+    async def serve_frontend():
+        """Serve the frontend index.html."""
+        index_path = STATIC_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+        return {"name": "Matthew Lee Bot API", "status": "online", "version": "0.2.0"}
+
+    @app.get("/{path:path}")
+    async def serve_static(path: str):
+        """Serve static files or fall back to index.html for SPA routing."""
+        # Skip API routes - they should have been handled above
+        if path.startswith("api/") or path == "health":
+            raise HTTPException(status_code=404, detail="Not found")
+
+        file_path = STATIC_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+
+        # Fall back to index.html for SPA routing
+        index_path = STATIC_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 if __name__ == "__main__":
