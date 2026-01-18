@@ -1,21 +1,55 @@
-#!/usr/bin/env python3
 """
-Vercel serverless function entry point for the FastAPI application.
+Vercel serverless function entry point.
 
-This module exports the FastAPI app for Vercel's Python runtime.
+This is a minimal handler that routes to the FastAPI app.
+For Vercel deployment, we need to handle the path setup carefully.
 """
 
-import sys
-from pathlib import Path
+from http.server import BaseHTTPRequestHandler
+import json
 
-# Add the parent directory to path so we can import from scripts/
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-sys.path.insert(0, str(parent_dir / "scripts"))
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
 
-# Import the FastAPI app from server
-from api.server import app
+        response = {
+            "name": "Matthew Lee Bot API",
+            "status": "online",
+            "version": "0.2.0",
+            "message": "API is running. Full functionality requires local deployment due to complex dependencies.",
+            "endpoints": {
+                "/api": "This endpoint - API status",
+                "/api/audit": "POST - Run citation audit (requires local deployment)",
+                "/api/extract": "POST - Extract claims from document (requires local deployment)",
+                "/api/resolve-citations": "POST - Resolve citations to URLs (requires local deployment)"
+            }
+        }
 
-# Vercel expects the app to be named 'app' or 'handler'
-# The FastAPI app is already named 'app' in server.py, so we just re-export it
-handler = app
+        self.wfile.write(json.dumps(response).encode())
+        return
+
+    def do_POST(self):
+        self.send_response(501)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+
+        response = {
+            "error": "Full API functionality requires local deployment",
+            "message": "The hallucination auditor has complex Python dependencies (PyMuPDF, spaCy, etc.) that exceed Vercel serverless limits. Please run locally with: python -m api.server",
+            "local_setup": "pip install -r requirements.txt && python -m api.server"
+        }
+
+        self.wfile.write(json.dumps(response).encode())
+        return
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+        return

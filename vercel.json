@@ -1,19 +1,27 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "installCommand": "cd ui && npm install",
-  "buildCommand": "cd ui && npm run build",
-  "outputDirectory": "ui/dist",
-  "rewrites": [
+  "builds": [
     {
-      "source": "/api/:path*",
-      "destination": "/api/index.py"
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "ui/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
     }
   ],
-  "functions": {
-    "api/index.py": {
-      "memory": 1024,
-      "maxDuration": 60
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/ui/$1"
     }
-  }
+  ]
 }
