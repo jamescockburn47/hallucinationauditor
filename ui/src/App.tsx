@@ -115,7 +115,7 @@ const LEE_CATEGORIES = {
   'general': { name: 'General AI/Hallucination Commentary', color: '#8b9bb4' }
 }
 
-type TabType = 'audit' | 'commentary'
+type TabType = 'audit' | 'commentary' | 'how-it-works'
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabType>('audit')
@@ -137,9 +137,6 @@ function App() {
   // Privacy mode - process documents client-side
   const [privacyMode, setPrivacyMode] = useState(true) // Default to privacy mode ON
   const [processingStatus, setProcessingStatus] = useState<string>('')
-  
-  // How it works section
-  const [showHowItWorks, setShowHowItWorks] = useState(false)
 
   // Commentary state
   const [commentaryCitations, setCommentaryCitations] = useState<string>('')
@@ -655,8 +652,8 @@ function App() {
             Judicial Commentary
           </button>
           <button 
-            className={`tab-btn info-btn ${showHowItWorks ? 'active' : ''}`}
-            onClick={() => setShowHowItWorks(!showHowItWorks)}
+            className={`tab-btn info-btn ${activeTab === 'how-it-works' ? 'active' : ''}`}
+            onClick={() => setActiveTab('how-it-works')}
           >
             <AlertCircle size={18} />
             How It Works
@@ -664,252 +661,57 @@ function App() {
         </nav>
       </header>
 
-      {/* How It Works Section */}
-      <AnimatePresence>
-        {showHowItWorks && (
-          <motion.section
-            className="how-it-works-section"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <div className="how-it-works-content">
-              <button 
-                className="close-btn"
-                onClick={() => setShowHowItWorks(false)}
-                aria-label="Close"
-              >
-                <X size={20} />
-              </button>
-              
-              <h2>How It Works</h2>
-              
-              <div className="info-grid">
-                <div className="info-card featured">
-                  <h3>⚖️ About Matthew Lee's Hallucination Taxonomy</h3>
-                  <p>
-                    This tool is inspired by the work of <strong>Matthew Lee</strong>, a barrister (England & Wales) 
-                    who has extensively documented and categorised AI-generated citation errors in legal proceedings.
-                  </p>
-                  <p>
-                    Through his blog <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">Natural and Artificial Intelligence in Law</a>, 
-                    Matthew has tracked over <strong>30 UK cases</strong> involving hallucinated citations — cases where AI tools 
-                    have generated fabricated authorities, incorrect citations, or misstated legal principles.
-                  </p>
-                  <p>
-                    His <strong>8 Hallucination Categories</strong> provide a systematic framework for classifying these errors:
-                  </p>
-                  <ol className="lee-categories-list">
-                    <li><strong>Type 1:</strong> Fabricated Case & Citation — completely invented</li>
-                    <li><strong>Type 2:</strong> Wrong Case Name, Right Citation</li>
-                    <li><strong>Type 3:</strong> Right Case Name, Wrong Citation</li>
-                    <li><strong>Type 4:</strong> Conflated Authorities — merging multiple cases</li>
-                    <li><strong>Type 5:</strong> Correct Law, Invented Authority</li>
-                    <li><strong>Type 6:</strong> Real Case, Misstated Facts/Ratio</li>
-                    <li><strong>Type 7:</strong> Misleading Secondary Paraphrase</li>
-                    <li><strong>Type 8:</strong> False Citations Citing False</li>
-                  </ol>
-                  <p className="blog-link">
-                    <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">
-                      Visit Matthew Lee's Blog →
-                    </a>
-                  </p>
-                </div>
-
-                <div className="info-card">
-                  <h3>🔍 What This Tool Does</h3>
-                  <p>
-                    This tool extracts legal citations from uploaded documents and attempts to retrieve 
-                    the referenced cases from <strong>Find Case Law</strong> (National Archives) and <strong>BAILII</strong>. 
-                    It then uses keyword matching to identify which paragraphs of the judgment may relate 
-                    to the propositions in your document.
-                  </p>
-                  <p>
-                    <strong>The goal:</strong> Save you time by automatically retrieving cases for manual verification, 
-                    giving you an indication of whether citations exist and where the relevant passages might be found.
-                  </p>
-                </div>
-
-                <div className="info-card privacy-card">
-                  <h3>🔒 Privacy Options</h3>
-                  <p>
-                    Choose how you want to use this tool based on your privacy requirements:
-                  </p>
-                  <div className="privacy-options-grid">
-                    <div className="privacy-option option-local">
-                      <div className="option-header">
-                        <span className="option-badge best">⭐ MOST PRIVATE</span>
-                        <h4>🖥️ Fully Local</h4>
-                      </div>
-                      <p className="option-description">Download and run entirely on your machine. Nothing leaves your computer except citation lookups to FCL/BAILII.</p>
-                      <ul>
-                        <li>✓ All document processing on your machine</li>
-                        <li>✓ No data sent to any server</li>
-                        <li>✓ Works offline (except case lookups)</li>
-                        <li>✓ Suitable for privileged documents</li>
-                      </ul>
-                      <a 
-                        href="https://github.com/jamescockburn47/hallucinationauditor/releases" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="option-btn primary"
-                      >
-                        Download Desktop App →
-                      </a>
-                    </div>
-
-                    <div className="privacy-option option-hybrid">
-                      <div className="option-header">
-                        <span className="option-badge good">✓ PRIVATE</span>
-                        <h4>🔀 Hybrid Mode</h4>
-                      </div>
-                      <p className="option-description">Document parsing happens in your browser. Only extracted citation strings are sent to the server for resolution.</p>
-                      <ul>
-                        <li>✓ Documents parsed locally in browser</li>
-                        <li>✓ Only citations sent to server</li>
-                        <li>✓ No document storage</li>
-                        <li>✓ Suitable for most documents</li>
-                      </ul>
-                      <button 
-                        className="option-btn secondary"
-                        onClick={() => {
-                          setPrivacyMode(true)
-                          setActiveTab('audit')
-                        }}
-                      >
-                        Use Hybrid Mode →
-                      </button>
-                    </div>
-
-                    <div className="privacy-option option-online">
-                      <div className="option-header">
-                        <span className="option-badge caution">⚠ NOT PRIVATE</span>
-                        <h4>☁️ Fully Online</h4>
-                      </div>
-                      <p className="option-description">Document is uploaded and processed on the server. Faster but not suitable for confidential materials.</p>
-                      <ul>
-                        <li>⚠ Document sent to server</li>
-                        <li>✓ Documents NOT stored</li>
-                        <li>✓ Faster processing</li>
-                        <li className="warning-item">⛔ Do NOT use for privileged documents</li>
-                      </ul>
-                      <button 
-                        className="option-btn tertiary"
-                        onClick={() => {
-                          setPrivacyMode(false)
-                          setActiveTab('audit')
-                        }}
-                      >
-                        Use Online Mode →
-                      </button>
-                    </div>
-                  </div>
-                  <p className="warning-note">
-                    <AlertCircle size={14} />
-                    <strong>Web Search Fallback:</strong> If enabled, citation text may be sent to external search engines. 
-                    This is opt-in and requires your explicit consent.
-                  </p>
-                </div>
-
-                <div className="info-card">
-                  <h3>⚠️ Important Caveats</h3>
-                  <ul>
-                    <li>
-                      <strong>Proof of Concept:</strong> This tool was created as a proof of concept in a single evening 
-                      using AI-assisted coding.
-                    </li>
-                    <li>
-                      <strong>Not AI Analysis:</strong> While the code was written with AI assistance, the verification 
-                      process itself does <em>not</em> use AI — it relies on pattern matching and keyword analysis.
-                    </li>
-                    <li>
-                      <strong>Always Verify:</strong> All sources and results should be independently checked. 
-                      This tool provides <em>indications</em>, not definitive answers.
-                    </li>
-                    <li>
-                      <strong>Do Not Rely Upon:</strong> This tool should not be relied upon for legal advice, 
-                      court submissions, or any professional legal work without thorough manual verification.
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="info-card">
-                  <h3>📋 The Verification Process</h3>
-                  <ol>
-                    <li><strong>Extract Citations:</strong> Regex patterns identify legal citations in your document</li>
-                    <li><strong>Resolve to URLs:</strong> Citations are matched to Find Case Law or BAILII URLs</li>
-                    <li><strong>Fetch Judgments:</strong> Full judgment text is retrieved from official sources</li>
-                    <li><strong>Parse Content:</strong> Judgments are parsed into paragraphs</li>
-                    <li><strong>Keyword Match:</strong> Your proposition is compared against judgment paragraphs</li>
-                    <li><strong>Display Results:</strong> Matching paragraphs are shown with direct links</li>
-                  </ol>
-                </div>
-              </div>
-
-              <div className="info-card get-started-card">
-                <h3>🚀 Quick Start</h3>
-                <p className="get-started-intro">Choose the option that best fits your privacy requirements:</p>
-                <div className="get-started-options three-col">
-                  <div className="get-started-option highlight">
-                    <span className="quick-badge best">⭐ Recommended</span>
-                    <h4>🖥️ Desktop App</h4>
-                    <p>Maximum privacy. Download and run locally on Windows.</p>
-                    <a 
-                      href="https://github.com/jamescockburn47/hallucinationauditor/releases" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="get-started-btn primary"
-                    >
-                      Download .exe →
-                    </a>
-                  </div>
-                  <div className="get-started-option">
-                    <span className="quick-badge good">✓ Private</span>
-                    <h4>🔀 Hybrid Mode</h4>
-                    <p>Documents parsed in browser. Only citations sent to server.</p>
-                    <button 
-                      className="get-started-btn secondary"
-                      onClick={() => {
-                        setPrivacyMode(true)
-                        setActiveTab('audit')
-                      }}
-                    >
-                      Start (Hybrid) →
-                    </button>
-                  </div>
-                  <div className="get-started-option">
-                    <span className="quick-badge caution">⚠ Not Private</span>
-                    <h4>☁️ Online Mode</h4>
-                    <p>Fastest. Do NOT use for privileged documents.</p>
-                    <button 
-                      className="get-started-btn tertiary"
-                      onClick={() => {
-                        setPrivacyMode(false)
-                        setActiveTab('audit')
-                      }}
-                    >
-                      Start (Online) →
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="disclaimer-box">
-                <strong>Disclaimer:</strong> This is an experimental tool for educational and research purposes only. 
-                It is not a substitute for professional legal research. The developers accept no liability for any 
-                errors, omissions, or consequences arising from its use. Always verify citations manually before 
-                relying on them in any legal context.
-              </div>
-            </div>
-          </motion.section>
-        )}
-      </AnimatePresence>
-
       <main className="main-content">
         {/* ===== AUDIT TAB ===== */}
         {activeTab === 'audit' && (
           <>
+            {/* Deployment Options Banner */}
+            <motion.section 
+              className="deployment-options-banner"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <h2>Choose Your Mode</h2>
+              <div className="deployment-options-grid">
+                <div className="deployment-option option-local">
+                  <span className="deploy-badge best">⭐ MOST PRIVATE</span>
+                  <h3>🖥️ Fully Local</h3>
+                  <p>Download and run on your machine. Suitable for privileged documents.</p>
+                  <a 
+                    href="https://github.com/jamescockburn47/hallucinationauditor/releases" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="deploy-btn primary"
+                  >
+                    Download .exe →
+                  </a>
+                </div>
+                <div className={`deployment-option option-hybrid ${privacyMode ? 'selected' : ''}`}>
+                  <span className="deploy-badge good">✓ PRIVATE</span>
+                  <h3>🔀 Hybrid Mode</h3>
+                  <p>Documents parsed in browser. Only citations sent to server.</p>
+                  <button 
+                    className={`deploy-btn ${privacyMode ? 'active' : 'secondary'}`}
+                    onClick={() => setPrivacyMode(true)}
+                  >
+                    {privacyMode ? '✓ Selected' : 'Use Hybrid →'}
+                  </button>
+                </div>
+                <div className={`deployment-option option-online ${!privacyMode ? 'selected' : ''}`}>
+                  <span className="deploy-badge caution">⚠ NOT PRIVATE</span>
+                  <h3>☁️ Fully Online</h3>
+                  <p>Fastest. Do NOT use for privileged documents.</p>
+                  <button 
+                    className={`deploy-btn ${!privacyMode ? 'active' : 'tertiary'}`}
+                    onClick={() => setPrivacyMode(false)}
+                  >
+                    {!privacyMode ? '✓ Selected' : 'Use Online →'}
+                  </button>
+                </div>
+              </div>
+            </motion.section>
+
             {/* Document Upload Section */}
             <motion.section 
               className="upload-section"
@@ -1584,6 +1386,194 @@ function App() {
               )}
             </AnimatePresence>
           </>
+        )}
+
+        {/* ===== HOW IT WORKS TAB ===== */}
+        {activeTab === 'how-it-works' && (
+          <motion.div
+            className="how-it-works-page"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <h2>How It Works</h2>
+            
+            <div className="info-grid">
+              <div className="info-card featured">
+                <h3>⚖️ About Matthew Lee's Hallucination Taxonomy</h3>
+                <p>
+                  This tool is inspired by the work of <strong>Matthew Lee</strong>, a barrister (England & Wales) 
+                  who has extensively documented and categorised AI-generated citation errors in legal proceedings.
+                </p>
+                <p>
+                  Through his blog <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">Natural and Artificial Intelligence in Law</a>, 
+                  Matthew has tracked over <strong>30 UK cases</strong> involving hallucinated citations — cases where AI tools 
+                  have generated fabricated authorities, incorrect citations, or misstated legal principles.
+                </p>
+                <p>
+                  His <strong>8 Hallucination Categories</strong> provide a systematic framework for classifying these errors:
+                </p>
+                <ol className="lee-categories-list">
+                  <li><strong>Type 1:</strong> Fabricated Case & Citation — completely invented</li>
+                  <li><strong>Type 2:</strong> Wrong Case Name, Right Citation</li>
+                  <li><strong>Type 3:</strong> Right Case Name, Wrong Citation</li>
+                  <li><strong>Type 4:</strong> Conflated Authorities — merging multiple cases</li>
+                  <li><strong>Type 5:</strong> Correct Law, Invented Authority</li>
+                  <li><strong>Type 6:</strong> Real Case, Misstated Facts/Ratio</li>
+                  <li><strong>Type 7:</strong> Misleading Secondary Paraphrase</li>
+                  <li><strong>Type 8:</strong> False Citations Citing False</li>
+                </ol>
+                <p className="blog-link">
+                  <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">
+                    Visit Matthew Lee's Blog →
+                  </a>
+                </p>
+              </div>
+
+              <div className="info-card">
+                <h3>🔍 What This Tool Does</h3>
+                <p>
+                  This tool extracts legal citations from uploaded documents and attempts to retrieve 
+                  the referenced cases from <strong>Find Case Law</strong> (National Archives) and <strong>BAILII</strong>. 
+                  It then uses keyword matching to identify which paragraphs of the judgment may relate 
+                  to the propositions in your document.
+                </p>
+                <p>
+                  <strong>The goal:</strong> Save you time by automatically retrieving cases for manual verification, 
+                  giving you an indication of whether citations exist and where the relevant passages might be found.
+                </p>
+              </div>
+
+              <div className="info-card">
+                <h3>⚠️ Important Caveats</h3>
+                <ul>
+                  <li>
+                    <strong>Proof of Concept:</strong> This tool was created as a proof of concept in a single evening 
+                    using AI-assisted coding.
+                  </li>
+                  <li>
+                    <strong>Not AI Analysis:</strong> While the code was written with AI assistance, the verification 
+                    process itself does <em>not</em> use AI — it relies on pattern matching and keyword analysis.
+                  </li>
+                  <li>
+                    <strong>Always Verify:</strong> All sources and results should be independently checked. 
+                    This tool provides <em>indications</em>, not definitive answers.
+                  </li>
+                  <li>
+                    <strong>Do Not Rely Upon:</strong> This tool should not be relied upon for legal advice, 
+                    court submissions, or any professional legal work without thorough manual verification.
+                  </li>
+                </ul>
+              </div>
+
+              <div className="info-card">
+                <h3>📋 The Verification Process</h3>
+                <ol>
+                  <li><strong>Extract Citations:</strong> Regex patterns identify legal citations in your document</li>
+                  <li><strong>Resolve to URLs:</strong> Citations are matched to Find Case Law or BAILII URLs</li>
+                  <li><strong>Fetch Judgments:</strong> Full judgment text is retrieved from official sources</li>
+                  <li><strong>Parse Content:</strong> Judgments are parsed into paragraphs</li>
+                  <li><strong>Keyword Match:</strong> Your proposition is compared against judgment paragraphs</li>
+                  <li><strong>Display Results:</strong> Matching paragraphs are shown with direct links</li>
+                </ol>
+              </div>
+
+              <div className="info-card rate-limits-card">
+                <h3>⏱️ Rate Limits</h3>
+                <p>
+                  To be respectful to Find Case Law and BAILII, this tool enforces rate limits on queries:
+                </p>
+                <table className="rate-limits-table">
+                  <thead>
+                    <tr>
+                      <th>Source</th>
+                      <th>Limit</th>
+                      <th>Retry Behaviour</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Find Case Law</td>
+                      <td>1 request/sec</td>
+                      <td>Exponential backoff on 429</td>
+                    </tr>
+                    <tr>
+                      <td>BAILII</td>
+                      <td>1 request/sec</td>
+                      <td>Exponential backoff on 429</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div className="rate-limit-modes">
+                  <div className="rate-limit-mode">
+                    <strong>🖥️ Fully Local Mode:</strong>
+                    <p>Rate limits are <span className="highlight-good">per-user</span>. You have your own 1 req/sec limit.</p>
+                  </div>
+                  <div className="rate-limit-mode">
+                    <strong>☁️ Hybrid/Online Modes:</strong>
+                    <p>Rate limits are <span className="highlight-caution">shared globally</span>. All users share the server's rate limit, which may cause delays during busy periods.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="info-card privacy-explained-card">
+                <h3>🔒 Privacy Mode Comparison</h3>
+                <table className="privacy-comparison-table">
+                  <thead>
+                    <tr>
+                      <th>Aspect</th>
+                      <th>🖥️ Fully Local</th>
+                      <th>🔀 Hybrid</th>
+                      <th>☁️ Fully Online</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Document Processing</td>
+                      <td className="cell-good">Your machine</td>
+                      <td className="cell-good">Your browser</td>
+                      <td className="cell-caution">Server</td>
+                    </tr>
+                    <tr>
+                      <td>Citation Resolution</td>
+                      <td className="cell-good">Your machine → FCL/BAILII</td>
+                      <td className="cell-neutral">Server → FCL/BAILII</td>
+                      <td className="cell-neutral">Server → FCL/BAILII</td>
+                    </tr>
+                    <tr>
+                      <td>Document Stored?</td>
+                      <td className="cell-good">Never</td>
+                      <td className="cell-good">Never</td>
+                      <td className="cell-good">Never</td>
+                    </tr>
+                    <tr>
+                      <td>Rate Limits</td>
+                      <td className="cell-good">Per-user</td>
+                      <td className="cell-caution">Shared</td>
+                      <td className="cell-caution">Shared</td>
+                    </tr>
+                    <tr>
+                      <td>Privileged Docs?</td>
+                      <td className="cell-good">✓ Safe</td>
+                      <td className="cell-good">✓ Safe</td>
+                      <td className="cell-bad">✗ Not recommended</td>
+                    </tr>
+                    <tr>
+                      <td>Web Search</td>
+                      <td colSpan={3} className="cell-neutral">Opt-in only. If enabled, citation text sent to search engines.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <button 
+              className="back-to-audit-btn"
+              onClick={() => setActiveTab('audit')}
+            >
+              ← Back to Citation Audit
+            </button>
+          </motion.div>
         )}
       </main>
 
