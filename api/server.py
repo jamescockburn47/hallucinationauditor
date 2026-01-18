@@ -31,10 +31,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Change working directory to hallucination-auditor for consistent paths
 os.chdir(Path(__file__).parent.parent)
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+import secrets
+import base64
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
 from utils.file_helpers import safe_read_json, safe_write_json
@@ -153,6 +156,49 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ===== Password Protection =====
+# Simple HTTP Basic Auth for the entire site using middleware
+SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "Citecheck2026")
+AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "true").lower() == "true"
+
+
+class BasicAuthMiddleware(BaseHTTPMiddleware):
+    """Middleware to require HTTP Basic Auth for all requests."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip auth if disabled
+        if not AUTH_ENABLED:
+            return await call_next(request)
+
+        # Allow static assets without auth (they're loaded after initial page auth)
+        if request.url.path.startswith("/assets/"):
+            return await call_next(request)
+
+        # Check for Authorization header
+        auth_header = request.headers.get("Authorization")
+        if auth_header:
+            try:
+                scheme, credentials = auth_header.split()
+                if scheme.lower() == "basic":
+                    decoded = base64.b64decode(credentials).decode("utf-8")
+                    username, password = decoded.split(":", 1)
+                    if secrets.compare_digest(password, SITE_PASSWORD):
+                        return await call_next(request)
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        # Return 401 with WWW-Authenticate header to prompt for credentials
+        return Response(
+            content="Authentication required",
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Citecheck"'},
+        )
+
+
+# Add auth middleware
+app.add_middleware(BasicAuthMiddleware)
+
 
 # Static directory path for frontend files
 STATIC_DIR = Path(__file__).parent.parent / "static"
