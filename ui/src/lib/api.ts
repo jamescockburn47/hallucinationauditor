@@ -41,25 +41,41 @@ export interface CitationResolveResponse {
   };
 }
 
+export interface CitationWithContext {
+  citation: string;
+  case_name?: string | null;
+  claim_text?: string | null;
+}
+
 /**
  * Resolve citations to URLs and fetch judgment paragraphs
- * 
- * Privacy: Only citation strings are sent to the server.
+ *
+ * Privacy: Only citation strings and case names are sent to the server.
  * No document content leaves the browser.
  */
 export async function resolveCitations(
-  citations: string[],
+  citations: string[] | CitationWithContext[],
   webSearchEnabled: boolean = false
 ): Promise<CitationResolveResponse> {
+  // Determine if we have simple strings or objects with context
+  const hasContext = citations.length > 0 && typeof citations[0] === 'object';
+
+  const body = hasContext
+    ? {
+        citations_with_context: citations as CitationWithContext[],
+        web_search_enabled: webSearchEnabled,
+      }
+    : {
+        citations: citations as string[],
+        web_search_enabled: webSearchEnabled,
+      };
+
   const response = await fetch(`${API_BASE}/api/resolve-citations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      citations,
-      web_search_enabled: webSearchEnabled,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

@@ -1238,9 +1238,17 @@ async def get_report(job_id: str):
 # These endpoints only accept citation strings, not document content
 # For use when document parsing happens client-side in the browser
 
+class CitationWithContext(BaseModel):
+    """A citation with optional context like case name"""
+    citation: str
+    case_name: Optional[str] = None
+    claim_text: Optional[str] = None  # The legal proposition for verification context
+
+
 class CitationResolveRequest(BaseModel):
     """Request to resolve citations - no document content needed"""
-    citations: List[str]
+    citations: List[str] = []  # Simple list for backward compatibility
+    citations_with_context: Optional[List[CitationWithContext]] = None  # New: with case names
     web_search_enabled: bool = False
 
 
@@ -1265,26 +1273,53 @@ class CitationResolveResponse(BaseModel):
 async def resolve_citations_only(request: CitationResolveRequest):
     """
     Resolve citations to URLs and fetch judgment paragraphs.
-    
-    This endpoint accepts ONLY citation strings, not document content.
+
+    This endpoint accepts citation strings with optional case names.
     For use with client-side document parsing where the browser handles
     text extraction and citation extraction locally.
-    
-    Privacy: No document content is sent to this endpoint.
-    Only extracted citation strings are processed.
+
+    Privacy: Only citation strings and case names are processed.
+    No document content is sent to this endpoint.
     """
-    logger.info(f"Resolving {len(request.citations)} citations (client-side mode)")
-    
-    resolved_citations = []
-    summary = {"total": len(request.citations), "found": 0, "not_found": 0}
-    
+    # Build unified list of citations with context
+    citations_to_process = []
+
+    # Handle new format with case names
+    if request.citations_with_context:
+        for ctx in request.citations_with_context:
+            citations_to_process.append({
+                "citation": ctx.citation.strip(),
+                "case_name": ctx.case_name,
+                "claim_text": ctx.claim_text
+            })
+
+    # Handle legacy format (just strings) - backward compatible
     for citation_text in request.citations:
         citation_text = citation_text.strip()
+        if citation_text:
+            # Check if not already in the list
+            existing = [c["citation"] for c in citations_to_process]
+            if citation_text not in existing:
+                citations_to_process.append({
+                    "citation": citation_text,
+                    "case_name": extract_case_name_from_citation(citation_text),
+                    "claim_text": None
+                })
+
+    logger.info(f"Resolving {len(citations_to_process)} citations (client-side mode)")
+
+    resolved_citations = []
+    summary = {"total": len(citations_to_process), "found": 0, "not_found": 0}
+
+    for ctx in citations_to_process:
+        citation_text = ctx["citation"]
         if not citation_text:
             continue
-        
-        # Extract case name from citation
-        case_name = extract_case_name_from_citation(citation_text)
+
+        # Use provided case name or try to extract from citation string
+        case_name = ctx.get("case_name") or extract_case_name_from_citation(citation_text)
+
+        logger.info(f"Processing citation: {citation_text}, case_name: {case_name}")
         
         try:
             # Resolve citation to URL

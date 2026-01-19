@@ -345,24 +345,55 @@ function App() {
     try {
       if (privacyMode) {
         // CLIENT-SIDE AUDIT MODE
-        // Only send citation strings to server for resolution
+        // Send citation strings WITH case names to server for resolution
         // Verification happens locally in the browser
-        
-        // Collect all unique citations
-        const allCitations = new Set<string>()
+
+        // Import the type for citations with context
+        type CitationWithContext = { citation: string; case_name?: string | null; claim_text?: string | null }
+
+        // Collect all unique citations with their case names
+        const citationMap = new Map<string, CitationWithContext>()
         validClaims.forEach(claim => {
           claim.citations.forEach(cit => {
-            if (cit.raw.trim()) {
-              allCitations.add(cit.raw.trim())
+            const citText = cit.raw.trim()
+            if (citText && !citationMap.has(citText.toLowerCase())) {
+              // Try to extract case name from the claim text
+              // Look for patterns like "Caparo v Dickman" before the citation
+              let caseName: string | null = null
+
+              // Pattern: "Case Name v Other" or "Case Name" followed by citation-like text
+              const caseNamePatterns = [
+                // Standard v pattern: captures "Party v Party" or "R v Party"
+                /([A-Z][A-Za-z'\-\.]+(?:\s+(?:Industries|Holdings|plc|Ltd|Co))*\s+v\.?\s+[A-Z][A-Za-z'\-\.]+(?:\s+(?:and\s+(?:Others?|Another|Ors))?)?)/i,
+                // R v pattern
+                /(R\s+v\.?\s+[A-Z][A-Za-z'\-\.]+)/i,
+                // Re/In re pattern
+                /((?:In\s+)?[Rr]e\s+[A-Z][A-Za-z'\-\.]+)/i,
+              ]
+
+              for (const pattern of caseNamePatterns) {
+                const match = claim.text.match(pattern)
+                if (match) {
+                  caseName = match[1].trim()
+                  break
+                }
+              }
+
+              citationMap.set(citText.toLowerCase(), {
+                citation: citText,
+                case_name: caseName,
+                claim_text: claim.text.slice(0, 200) // Send first 200 chars for context
+              })
             }
           })
         })
-        
-        setProcessingStatus(`Resolving ${allCitations.size} citation(s)...`)
-        
-        // Send only citation strings to server for resolution
+
+        const citationsWithContext = Array.from(citationMap.values())
+        setProcessingStatus(`Resolving ${citationsWithContext.length} citation(s)...`)
+
+        // Send citations WITH case names to server for resolution
         const resolveResponse = await resolveCitations(
-          Array.from(allCitations),
+          citationsWithContext,
           webSearchEnabled
         )
         
@@ -471,26 +502,19 @@ function App() {
       } else {
         // LEGACY SERVER-SIDE MODE
         setProcessingStatus('Processing on server...')
-        
-        const response = await fetch('http://localhost:8000/api/audit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: jobTitle || 'Citation Audit',
-            claims: validClaims.map((c, i) => ({
-              claim_id: `claim_${i + 1}`,
-              text: c.text,
-              citations: c.citations.filter(cit => cit.raw.trim())
-            })),
-            web_search_enabled: webSearchEnabled
-          })
-        })
 
-        if (!response.ok) {
-          throw new Error('Audit failed')
-        }
+        // Use runServerAudit from api.ts which handles API_BASE correctly
+        const { runServerAudit } = await import('./lib/api')
+        const data = await runServerAudit(
+          validClaims.map((c, i) => ({
+            claim_id: `claim_${i + 1}`,
+            text: c.text,
+            citations: c.citations.filter(cit => cit.raw.trim())
+          })),
+          jobTitle || 'Citation Audit',
+          webSearchEnabled
+        )
 
-        const data = await response.json()
         setReport(data)
       }
     } catch (err) {
