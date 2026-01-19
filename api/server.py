@@ -1418,8 +1418,9 @@ async def resolve_citations_only(request: CitationResolveRequest):
         )
 
     # Use ThreadPoolExecutor for parallel I/O-bound operations
-    # Limit concurrency to avoid overwhelming external services
-    max_workers = min(num_citations, 5)
+    # BAILII and FCL have no explicit rate limits, so we can use more workers
+    # 10 concurrent requests is reasonable for a single user session
+    max_workers = min(num_citations, 10)
 
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

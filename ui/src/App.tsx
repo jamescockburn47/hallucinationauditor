@@ -14,7 +14,10 @@ import {
   Info,
   ExternalLink,
   ChevronRight,
-  Search
+  Search,
+  Plus,
+  Eye,
+  EyeOff
 } from 'lucide-react'
 import './App.css'
 
@@ -101,6 +104,16 @@ function App() {
   // Judgment viewer search
   const [judgmentSearch, setJudgmentSearch] = useState('')
 
+  // Document viewer state
+  const [documentText, setDocumentText] = useState('')
+  const [showDocumentViewer, setShowDocumentViewer] = useState(false)
+  const [documentSearch, setDocumentSearch] = useState('')
+
+  // Manual citation adding
+  const [showAddCitation, setShowAddCitation] = useState(false)
+  const [manualCitation, setManualCitation] = useState('')
+  const [manualCaseName, setManualCaseName] = useState('')
+
   // File handlers
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault()
@@ -141,6 +154,8 @@ function App() {
   const clearFile = () => {
     setUploadedFile(null)
     setExtractedCitations([])
+    setDocumentText('')
+    setShowDocumentViewer(false)
     setView('upload')
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -160,6 +175,9 @@ function App() {
       if (!text || text.trim().length < 50) {
         throw new Error('Could not extract text from document')
       }
+
+      // Store document text for the document viewer (locally only)
+      setDocumentText(text)
 
       const propositions = extractPropositions(text)
 
@@ -353,6 +371,64 @@ function App() {
       else counts.needsReview++
     })
     return counts
+  }
+
+  // Add manual citation
+  const handleAddManualCitation = () => {
+    if (!manualCitation.trim()) return
+
+    const newId = `manual-${Date.now()}`
+    const newItem: ExtractedCitationItem = {
+      id: newId,
+      caseName: manualCaseName.trim() || extractCaseNameFromText(manualCitation) || null,
+      citation: manualCitation.trim(),
+      proposition: 'Manually added citation',
+      status: 'pending'
+    }
+
+    setExtractedCitations(prev => [...prev, newItem])
+    setManualCitation('')
+    setManualCaseName('')
+    setShowAddCitation(false)
+  }
+
+  // Get all citation strings for highlighting in document viewer
+  const getCitationPatterns = () => {
+    return extractedCitations.map(c => c.citation)
+  }
+
+  // Highlight citations in document text
+  const getHighlightedDocumentHtml = () => {
+    if (!documentText) return ''
+
+    let html = documentText
+    const patterns = getCitationPatterns()
+
+    // Escape HTML first
+    html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+    // Highlight each citation
+    patterns.forEach(pattern => {
+      const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const regex = new RegExp(`(${escapedPattern})`, 'gi')
+      html = html.replace(regex, '<mark class="citation-highlight">$1</mark>')
+    })
+
+    // Also highlight any citation patterns that might have been missed
+    // Neutral citations: [YYYY] COURT NUM
+    html = html.replace(
+      /(\[\d{4}\]\s+(?:UKSC|UKPC|UKHL|EWCA\s+(?:Civ|Crim)|EWHC|UKUT|UKEAT|CSIH|CSOH)\s+\d+(?:\s*\([A-Za-z]+\))?)/gi,
+      (match) => {
+        // Only wrap if not already wrapped
+        if (match.includes('citation-highlight')) return match
+        return `<mark class="citation-highlight potential">${match}</mark>`
+      }
+    )
+
+    // Convert newlines to paragraphs
+    html = html.split(/\n\n+/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('')
+
+    return html
   }
 
   const selectedItem = extractedCitations.find(c => c.id === selectedCitation)
@@ -608,9 +684,18 @@ function App() {
                   <FileText size={18} />
                   <span>{documentTitle}</span>
                 </div>
-                <button className="back-btn" onClick={clearFile}>
-                  <X size={16} />
-                </button>
+                <div className="panel-actions">
+                  <button
+                    className="view-doc-btn"
+                    onClick={() => setShowDocumentViewer(!showDocumentViewer)}
+                    title={showDocumentViewer ? "Hide document" : "View document"}
+                  >
+                    {showDocumentViewer ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                  <button className="back-btn" onClick={clearFile}>
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
 
               {/* Status Summary */}
@@ -674,6 +759,49 @@ function App() {
                 ))}
               </div>
 
+              {/* Citation count warning */}
+              {extractedCitations.length >= 20 && (
+                <div className="citation-warning">
+                  <AlertCircle size={14} />
+                  <span>Large document: {extractedCitations.length} citations found. Use "View Document" to check for missed citations.</span>
+                </div>
+              )}
+
+              {/* Add Citation Button */}
+              {!showAddCitation ? (
+                <button
+                  className="add-citation-btn"
+                  onClick={() => setShowAddCitation(true)}
+                >
+                  <Plus size={14} />
+                  Add Citation
+                </button>
+              ) : (
+                <div className="add-citation-form">
+                  <input
+                    type="text"
+                    placeholder="Citation (e.g., [2019] UKSC 12)"
+                    value={manualCitation}
+                    onChange={(e) => setManualCitation(e.target.value)}
+                    autoFocus
+                  />
+                  <input
+                    type="text"
+                    placeholder="Case name (optional)"
+                    value={manualCaseName}
+                    onChange={(e) => setManualCaseName(e.target.value)}
+                  />
+                  <div className="add-citation-actions">
+                    <button onClick={handleAddManualCitation} disabled={!manualCitation.trim()}>
+                      Add
+                    </button>
+                    <button onClick={() => { setShowAddCitation(false); setManualCitation(''); setManualCaseName(''); }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Run Audit Button */}
               {!isAuditing && extractedCitations.some(c => c.status === 'pending') && (
                 <div className="audit-controls">
@@ -687,11 +815,58 @@ function App() {
                   </label>
                   <button className="run-audit-btn" onClick={runAudit}>
                     <FileSearch size={18} />
-                    Run Audit
+                    Run Audit ({extractedCitations.filter(c => c.status === 'pending').length} citations)
                   </button>
                 </div>
               )}
             </div>
+
+            {/* Document Viewer Panel */}
+            {showDocumentViewer && documentText && (
+              <div className="document-viewer-panel">
+                <div className="doc-viewer-header">
+                  <h3>Document Preview</h3>
+                  <div className="doc-viewer-info">
+                    <span className="highlight-legend">
+                      <span className="highlight-dot detected"></span> Detected
+                    </span>
+                    <span className="highlight-legend">
+                      <span className="highlight-dot potential"></span> Potential (click to add)
+                    </span>
+                  </div>
+                  <button onClick={() => setShowDocumentViewer(false)}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="doc-viewer-search">
+                  <Search size={14} />
+                  <input
+                    type="text"
+                    placeholder="Search document..."
+                    value={documentSearch}
+                    onChange={(e) => setDocumentSearch(e.target.value)}
+                  />
+                </div>
+                <div
+                  className="doc-viewer-content"
+                  dangerouslySetInnerHTML={{ __html: getHighlightedDocumentHtml() }}
+                  onClick={(e) => {
+                    // Handle clicking on potential citations to add them
+                    const target = e.target as HTMLElement
+                    if (target.classList.contains('potential')) {
+                      const citationText = target.textContent || ''
+                      if (citationText && !extractedCitations.find(c => c.citation.toLowerCase() === citationText.toLowerCase())) {
+                        setManualCitation(citationText)
+                        setShowAddCitation(true)
+                      }
+                    }
+                  }}
+                />
+                <div className="doc-viewer-footer">
+                  <span>Document processed locally. Content never leaves your browser.</span>
+                </div>
+              </div>
+            )}
 
             {/* Right Panel - Detail View */}
             <div className="detail-panel">
