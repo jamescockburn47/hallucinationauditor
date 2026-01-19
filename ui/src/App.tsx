@@ -280,8 +280,8 @@ function App() {
               title: resolved.title || undefined,
               confidence: Math.round(score * 100),
               notes: matches.length > 0
-                ? `Found ${matches.length} matching paragraph(s)`
-                : 'No strong keyword matches found',
+                ? `Case verified. Found ${matches.length} matching paragraph(s).`
+                : 'Case verified on BAILII/FCL. No keyword matches for proposition specifics.',
               matchingParagraphs: matches.map(m => ({
                 para_num: m.para_num,
                 text: m.text.slice(0, 400) + (m.text.length > 400 ? '...' : ''),

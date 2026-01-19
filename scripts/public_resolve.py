@@ -338,12 +338,16 @@ def verify_bailii_url_exists(url: str, timeout: int = 10) -> bool:
         return False
 
 
-def try_fcl_neutral_citation_patterns(citation_text: str) -> Optional[Dict[str, Any]]:
+def try_fcl_neutral_citation_patterns(citation_text: str, verify_url: bool = True) -> Optional[Dict[str, Any]]:
     """
     Try to match citation against FCL neutral citation patterns for direct URL construction.
 
     FCL FALLBACK: This is the fallback resolution method.
     Returns candidate dict if matched, None otherwise.
+
+    Args:
+        citation_text: The citation to resolve
+        verify_url: If True, verify the constructed URL actually returns a valid case page
     """
     for pattern_name, config in FCL_NEUTRAL_PATTERNS.items():
         match = re.search(config["pattern"], citation_text, re.IGNORECASE)
@@ -351,6 +355,13 @@ def try_fcl_neutral_citation_patterns(citation_text: str) -> Optional[Dict[str, 
             year = match.group(1)
             num = match.group(2)
             url = config["url_template"].format(year=year, num=num)
+
+            # Verify the URL actually returns a valid case page
+            if verify_url and requests is not None:
+                if not verify_fcl_url_exists(url):
+                    logger.debug(f"FCL neutral citation URL does not exist: {url}")
+                    continue  # Try next pattern if this URL doesn't work
+
             return {
                 "url": url,
                 "source": "find_case_law",
@@ -361,6 +372,58 @@ def try_fcl_neutral_citation_patterns(citation_text: str) -> Optional[Dict[str, 
                 "number": num,
             }
     return None
+
+
+def verify_fcl_url_exists(url: str, timeout: int = 10) -> bool:
+    """
+    Verify that a Find Case Law (FCL) URL actually returns a valid case page.
+
+    Returns True if the URL exists and contains case content.
+    Returns False if it's a 404, error page, or empty page.
+    """
+    if requests is None:
+        return True  # Can't verify, assume it exists
+
+    try:
+        response = requests.get(
+            url,
+            timeout=timeout,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            allow_redirects=True
+        )
+
+        # FCL returns 404 for non-existent cases
+        if response.status_code == 404:
+            return False
+
+        if response.status_code != 200:
+            return False
+
+        # Check for "Page not found" in response (FCL shows this for invalid URLs)
+        text_lower = response.text.lower()
+        if 'page not found' in text_lower[:1000]:
+            return False
+
+        # For XML responses, check if it contains actual case data
+        if url.endswith('.xml') or 'xml' in response.headers.get('content-type', ''):
+            # Valid FCL XML should contain case elements
+            if '<FRBRWork' not in response.text and '<akomaNtoso' not in response.text:
+                # Not a valid AkomaNtoso XML document
+                return False
+
+        # For HTML responses, check for case content
+        else:
+            # Should have substantial content
+            if len(response.text) < 1000:
+                return False
+
+        return True
+
+    except Exception as e:
+        logger.debug(f"Error verifying FCL URL {url}: {e}")
+        return False
 
 
 def try_neutral_citation_patterns(citation_text: str) -> Optional[Dict[str, Any]]:
