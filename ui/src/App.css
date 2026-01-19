@@ -1157,9 +1157,23 @@ html, body {
 
   .citations-panel {
     width: 100%;
-    max-height: 40vh;
+    max-height: 45vh;
     border-right: none;
     border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Ensure citation list scrolls within available space, keeping audit button visible */
+  .citations-panel .citation-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* Keep audit controls always visible at bottom */
+  .citations-panel .audit-controls {
+    flex-shrink: 0;
   }
 
   .detail-panel {
