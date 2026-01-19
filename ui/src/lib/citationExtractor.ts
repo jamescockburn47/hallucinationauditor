@@ -48,13 +48,15 @@ const TRADITIONAL_CITATION_PATTERNS = [
 ];
 
 // Pattern to extract case name - look for "Party v Party" patterns
+// These patterns are designed to capture FULL party names including multi-word names like "Caparo Industries plc"
 const CASE_NAME_PATTERNS = [
-  // Standard "Party v Party" or "Party v. Party" - most common pattern
-  /([A-Z][A-Za-z''\-\.]+(?:\s+(?:Industries|Holdings|plc|Ltd|Co|Corporation|Corp|Inc|Limited|LLP|LLC))?)\s+v\.?\s+([A-Z][A-Za-z''\-\.]+(?:\s+(?:and\s+(?:Others?|Another|Ors))?)?)/i,
-  // "R v Defendant" pattern (criminal cases)
-  /\b(R)\s+(v\.?)\s+([A-Z][A-Za-z''\-\.]+)/i,
+  // "R v Defendant" pattern (criminal cases) - check first as it's more specific
+  /\b(R)\s+(v\.?)\s+([A-Z][A-Za-z''\-\.\s]+?)(?=\s*[\[\(,]|\s+and\s+|\s*$)/i,
   // "Re Something" pattern (in the matter of)
-  /\b((?:In\s+)?[Rr]e)\s+([A-Z][A-Za-z''\-\.]+)/i,
+  /\b((?:In\s+)?[Rr]e)\s+([A-Z][A-Za-z''\-\.\s]+?)(?=\s*[\[\(,]|\s*$)/i,
+  // Standard "Party v Party" - capture everything before "v" that looks like a party name
+  // This captures multi-word names like "Caparo Industries plc" or "Hedley Byrne & Co Ltd"
+  /((?:[A-Z][A-Za-z''\-\.]+(?:\s+(?:&\s+)?)?)+(?:\s+(?:Industries|Holdings|plc|Ltd|Co|Corporation|Corp|Inc|Limited|LLP|LLC|Council|Authority|NHS|Trust|Board))?)\s+v\.?\s+((?:[A-Z][A-Za-z''\-\.]+(?:\s+(?:&\s+)?)?)+(?:\s+(?:Industries|Holdings|plc|Ltd|Co|Corporation|Corp|Inc|Limited|LLP|LLC|Council|Authority|Partners))?(?:\s+(?:and\s+(?:Others?|Another|Ors))?)?)/i,
 ];
 
 /**
@@ -65,17 +67,21 @@ export function extractCaseNameFromText(text: string): string | undefined {
   for (const pattern of CASE_NAME_PATTERNS) {
     const match = text.match(pattern);
     if (match) {
-      // For "R v X" pattern
+      // For "R v X" pattern (match[1]='R', match[2]='v', match[3]=defendant)
       if (match[1] === 'R' && match[2] && match[3]) {
-        return `R v ${match[3]}`;
+        const defendant = match[3].trim().replace(/\s+/g, ' ');
+        return `R v ${defendant}`;
       }
       // For "Re X" pattern
       if (match[1] && match[1].toLowerCase().includes('re') && match[2]) {
-        return `${match[1]} ${match[2]}`;
+        const subject = match[2].trim().replace(/\s+/g, ' ');
+        return `${match[1]} ${subject}`;
       }
       // For standard "Party v Party" pattern
       if (match[1] && match[2]) {
-        return `${match[1]} v ${match[2]}`;
+        const party1 = match[1].trim().replace(/\s+/g, ' ');
+        const party2 = match[2].trim().replace(/\s+/g, ' ');
+        return `${party1} v ${party2}`;
       }
     }
   }

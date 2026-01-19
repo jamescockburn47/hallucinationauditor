@@ -258,12 +258,16 @@ def extract_citation_year(citation_text: str) -> Optional[str]:
     return None
 
 
-def try_bailii_neutral_citation_patterns(citation_text: str) -> Optional[Dict[str, Any]]:
+def try_bailii_neutral_citation_patterns(citation_text: str, verify_url: bool = True) -> Optional[Dict[str, Any]]:
     """
     Try to match citation against BAILII neutral citation patterns for direct URL construction.
 
     BAILII-FIRST: This is the primary resolution method.
     Returns candidate dict if matched, None otherwise.
+
+    Args:
+        citation_text: The citation to resolve
+        verify_url: If True, verify the constructed URL actually returns a valid case page
     """
     for pattern_name, config in BAILII_NEUTRAL_PATTERNS.items():
         match = re.search(config["pattern"], citation_text, re.IGNORECASE)
@@ -271,6 +275,13 @@ def try_bailii_neutral_citation_patterns(citation_text: str) -> Optional[Dict[st
             year = match.group(1)
             num = match.group(2)
             url = config["url_template"].format(year=year, num=num)
+
+            # Verify the URL actually returns a valid case page
+            if verify_url and requests is not None:
+                if not verify_bailii_url_exists(url):
+                    logger.debug(f"BAILII neutral citation URL does not exist: {url}")
+                    continue  # Try next pattern if this URL doesn't work
+
             return {
                 "url": url,
                 "source": "bailii",
@@ -281,6 +292,50 @@ def try_bailii_neutral_citation_patterns(citation_text: str) -> Optional[Dict[st
                 "number": num,
             }
     return None
+
+
+def verify_bailii_url_exists(url: str, timeout: int = 10) -> bool:
+    """
+    Verify that a BAILII URL actually returns a valid case page.
+
+    Returns True if the URL exists and contains case content.
+    Returns False if it's a 404, error page, or empty page.
+    """
+    if requests is None:
+        return True  # Can't verify, assume it exists
+
+    try:
+        response = requests.get(
+            url,
+            timeout=timeout,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            allow_redirects=True
+        )
+
+        if response.status_code != 200:
+            return False
+
+        # Check if redirected to error page
+        if 'error.bailii.org' in response.url or 'error' in response.url.lower():
+            return False
+
+        # Parse and validate content
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(response.text, 'lxml')
+            return validate_bailii_page_has_content(soup)
+        except ImportError:
+            # Can't validate content without BeautifulSoup, check basic indicators
+            text_lower = response.text.lower()
+            if 'not found' in text_lower[:500] or 'error' in text_lower[:500]:
+                return False
+            return len(response.text) > 1000
+
+    except Exception as e:
+        logger.debug(f"Error verifying BAILII URL {url}: {e}")
+        return False
 
 
 def try_fcl_neutral_citation_patterns(citation_text: str) -> Optional[Dict[str, Any]]:
@@ -648,13 +703,36 @@ def try_bailii_citation_finder(citation_text: str, timeout: int = 30) -> Optiona
                     logger.debug(f"BAILII citation finder: not found for {clean_citation}")
                     return None
 
+                # Check for "Not found" in page content - BAILII sometimes returns 200 but shows error
+                page_text = soup.get_text().lower()
+                if 'not found' in page_text and ('citation' in page_text or 'case' in page_text):
+                    # Check if the "not found" is referring to the case itself
+                    # Look for patterns like "citation not found", "case not found", "no results"
+                    if any(phrase in page_text for phrase in [
+                        'citation not found',
+                        'case not found',
+                        'no case found',
+                        'no results found',
+                        'could not be found',
+                        'unable to find',
+                        'was not found'
+                    ]):
+                        logger.debug(f"BAILII citation finder: 'not found' message detected for {clean_citation}")
+                        return None
+
                 # We found the case! Extract URL from the final redirect
                 # The response.url should be the case page URL
                 case_url = response.url
 
-                # Double-check the URL is valid (not an error page)
+                # Double-check the URL is valid (not an error page or cgi script)
                 if 'error' in case_url.lower() or '/cgi-bin/' in case_url:
                     logger.debug(f"BAILII citation finder: invalid URL {case_url}")
+                    return None
+
+                # Validate that the page actually contains case content
+                # A real case page should have judgment text
+                if not validate_bailii_page_has_content(soup):
+                    logger.debug(f"BAILII citation finder: page has no case content for {clean_citation}")
                     return None
 
                 logger.info(f"BAILII citation finder: found {title[:60]} at {case_url}")
@@ -673,6 +751,78 @@ def try_bailii_citation_finder(citation_text: str, timeout: int = 30) -> Optiona
     except Exception as e:
         logger.error(f"BAILII citation finder error: {e}")
         return None
+
+
+def validate_bailii_page_has_content(soup) -> bool:
+    """
+    Validate that a BAILII page actually contains case content.
+
+    Returns True if the page appears to be a real case page with judgment text.
+    Returns False if it's an error page, empty page, or "not found" page.
+    """
+    try:
+        # Get all text content
+        text = soup.get_text()
+        text_lower = text.lower()
+
+        # Check for error indicators
+        error_indicators = [
+            'not found',
+            'error 404',
+            'page not found',
+            'no case found',
+            'citation not found',
+            'this page does not exist',
+            'sorry, we could not find',
+        ]
+
+        for indicator in error_indicators:
+            if indicator in text_lower:
+                # Make sure it's a prominent error, not just mentioned in passing
+                # Check if the error phrase appears in a heading or at the start
+                h1_tags = soup.find_all(['h1', 'h2', 'h3'])
+                for h in h1_tags:
+                    if indicator in h.get_text().lower():
+                        return False
+
+                # Check if "not found" is in the first 500 chars (likely an error message)
+                if indicator in text_lower[:500]:
+                    return False
+
+        # Check for positive indicators that this is a real case
+        # Real BAILII case pages typically have:
+        # 1. A substantial amount of text (judgments are long)
+        # 2. Legal terminology
+        # 3. Paragraph numbers or citations
+
+        # Must have substantial content (at least 1000 chars of text)
+        if len(text) < 1000:
+            return False
+
+        # Look for typical case page elements
+        positive_indicators = [
+            'judgment',
+            'court',
+            'lord',
+            'justice',
+            'appeal',
+            'claimant',
+            'defendant',
+            'respondent',
+            'appellant',
+            'lordship',
+            'held',
+            'ordered',
+        ]
+
+        matches = sum(1 for ind in positive_indicators if ind in text_lower)
+
+        # Should have at least 3 legal terms to be a real case
+        return matches >= 3
+
+    except Exception as e:
+        logger.debug(f"Error validating BAILII page: {e}")
+        return False
 
 
 def search_bailii(query: str, year: Optional[str] = None, case_name: Optional[str] = None, timeout: int = 30, citation_text: str = None) -> List[Dict[str, Any]]:
