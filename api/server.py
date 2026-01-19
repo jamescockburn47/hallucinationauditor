@@ -1898,7 +1898,8 @@ if STATIC_DIR.exists():
         """Serve the frontend index.html."""
         index_path = STATIC_DIR / "index.html"
         if index_path.exists():
-            return FileResponse(index_path)
+            # Never cache index.html to ensure users get fresh JS bundles
+            return FileResponse(index_path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
         return {"name": "Matthew Lee Bot API", "status": "online", "version": "0.2.0"}
 
     @app.get("/{path:path}")
@@ -1910,12 +1911,21 @@ if STATIC_DIR.exists():
 
         file_path = STATIC_DIR / path
         if file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
+            # Add cache-control headers based on file type
+            # Assets with hash in filename can be cached longer
+            if "/assets/" in path and any(c.isdigit() for c in path):
+                # Hashed assets - cache for 1 year
+                headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+            else:
+                # Other files - no cache to ensure fresh content
+                headers = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+            return FileResponse(file_path, headers=headers)
 
         # Fall back to index.html for SPA routing
         index_path = STATIC_DIR / "index.html"
         if index_path.exists():
-            return FileResponse(index_path)
+            # index.html should never be cached
+            return FileResponse(index_path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
         raise HTTPException(status_code=404, detail="Not found")
 
