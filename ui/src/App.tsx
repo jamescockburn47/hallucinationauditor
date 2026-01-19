@@ -72,10 +72,10 @@ const LEE_CATEGORIES = {
   '8': { name: 'False Citations Citing False', description: 'Chain of fabricated citations' },
 }
 
-type AppView = 'upload' | 'audit'
+type AppView = 'splash' | 'upload' | 'audit'
 
 function App() {
-  const [view, setView] = useState<AppView>('upload')
+  const [view, setView] = useState<AppView>('splash')
   const [showHowItWorks, setShowHowItWorks] = useState(false)
 
   // Document state
@@ -522,6 +522,136 @@ function App() {
       </AnimatePresence>
 
       <main className="main-container">
+        {/* Splash Page - Full Screen Welcome */}
+        {view === 'splash' && (
+          <motion.div
+            className="splash-page"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <div className="splash-content">
+              <div className="splash-header">
+                <div className="splash-logo">
+                  <Scale size={48} />
+                </div>
+                <h1>Citation Auditor</h1>
+                <p className="splash-tagline">Deterministic verification of legal citations</p>
+              </div>
+
+              <div className="splash-section">
+                <h2>What is this tool?</h2>
+                <p>
+                  Citation Auditor helps identify potentially fabricated legal citations in AI-generated
+                  legal documents. It checks whether cited cases actually exist on official legal databases
+                  (BAILII and Find Case Law).
+                </p>
+              </div>
+
+              <div className="splash-section">
+                <h2>Why do citation hallucinations happen?</h2>
+                <p>
+                  Large Language Models (LLMs) like ChatGPT generate text by predicting likely word sequences,
+                  not by retrieving facts from a database. When asked for legal citations, they may produce
+                  text that <em>looks</em> like a valid citation but refers to a case that doesn't exist.
+                </p>
+                <div className="hallucination-examples">
+                  <div className="example-item">
+                    <strong>More likely in edge cases:</strong>
+                    <span>Obscure topics, older cases, specific jurisdictions, or novel legal questions</span>
+                  </div>
+                  <div className="example-item">
+                    <strong>Plausible-sounding:</strong>
+                    <span>Generated citations often follow correct formatting but reference non-existent cases</span>
+                  </div>
+                  <div className="example-item">
+                    <strong>Confidently presented:</strong>
+                    <span>LLMs present fabricated citations with the same confidence as real ones</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="splash-section highlight-section">
+                <h2>No AI in this tool</h2>
+                <p>
+                  This tool uses <strong>no LLMs or AI</strong> for verification. It is fully deterministic:
+                  citations are matched against official databases using exact pattern matching and API lookups.
+                  The same input will always produce the same output.
+                </p>
+                <div className="deterministic-badge">
+                  <Shield size={20} />
+                  <span>100% Deterministic - No AI/LLM Used</span>
+                </div>
+              </div>
+
+              <div className="splash-section">
+                <h2>How it works</h2>
+                <div className="splash-steps">
+                  <div className="splash-step">
+                    <span className="step-num">1</span>
+                    <div>
+                      <strong>Local document parsing</strong>
+                      <p>Your document is processed in your browser - content never leaves your device</p>
+                    </div>
+                  </div>
+                  <div className="splash-step">
+                    <span className="step-num">2</span>
+                    <div>
+                      <strong>Citation extraction</strong>
+                      <p>Legal citations are identified using regex pattern matching</p>
+                    </div>
+                  </div>
+                  <div className="splash-step">
+                    <span className="step-num">3</span>
+                    <div>
+                      <strong>Database verification</strong>
+                      <p>Each citation is checked against BAILII and Find Case Law databases</p>
+                    </div>
+                  </div>
+                  <div className="splash-step">
+                    <span className="step-num">4</span>
+                    <div>
+                      <strong>Manual review</strong>
+                      <p>You review the judgment text to verify legal propositions yourself</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="splash-section warning-section">
+                <h2>Important Disclaimer</h2>
+                <ul className="disclaimer-list">
+                  <li>This tool provides <strong>indications only</strong>, not definitive legal verification</li>
+                  <li>A "not found" result does not guarantee a case is fabricated - it may exist in databases we don't search</li>
+                  <li>A "found" result does not guarantee the legal proposition attributed to it is correct</li>
+                  <li>This tool is <strong>not a substitute</strong> for proper legal research by a qualified professional</li>
+                  <li>You are solely responsible for verifying any citations before relying on them</li>
+                </ul>
+              </div>
+
+              <div className="splash-accept">
+                <p className="accept-text">
+                  By continuing, you acknowledge that you have read and understood the above information,
+                  and accept full responsibility for how you use the results of this tool.
+                </p>
+                <button
+                  className="continue-btn"
+                  onClick={() => setView('upload')}
+                >
+                  I Understand - Continue to Tool
+                  <ChevronRight size={20} />
+                </button>
+              </div>
+
+              <div className="splash-footer">
+                <p>
+                  Inspired by <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">Matthew Lee's research</a> on
+                  AI hallucinations in legal practice.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Upload View - Landing Page */}
         {view === 'upload' && (
           <motion.div
