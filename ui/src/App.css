@@ -1978,7 +1978,7 @@ html, body {
   }
 }
 
-/* ===== DEPLOYMENT OPTIONS BANNER ===== */
+/* ===== HOW IT WORKS BANNER ===== */
 .deployment-options-banner {
   background: linear-gradient(135deg, var(--color-bg-card) 0%, rgba(26, 34, 52, 0.8) 100%);
   border: 1px solid var(--border-accent);
@@ -1993,6 +1993,79 @@ html, body {
   color: var(--color-accent);
   margin-bottom: 1rem;
   text-align: center;
+}
+
+.how-it-works-summary {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.step-item {
+  flex: 1;
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--color-accent);
+  color: var(--color-bg);
+  font-weight: 700;
+  font-size: 0.85rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.step-content strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.step-content p {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.step-content em {
+  color: var(--color-accent-light);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.privacy-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: center;
+  color: var(--color-success);
+  font-size: 0.8rem;
+  padding: 0.75rem;
+  background: rgba(74, 222, 128, 0.1);
+  border-radius: var(--radius-sm);
+  margin: 0;
+}
+
+.privacy-note svg {
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .how-it-works-summary {
+    flex-direction: column;
+  }
 }
 
 .deployment-options-grid {

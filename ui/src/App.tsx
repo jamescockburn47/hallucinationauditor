@@ -134,8 +134,9 @@ function App() {
   // Web search consent
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   
-  // Privacy mode - process documents client-side
-  const [privacyMode, setPrivacyMode] = useState(true) // Default to privacy mode ON
+  // Privacy mode is now ALWAYS on - documents are always parsed client-side
+  // Only citation strings are sent to the server for resolution
+  const privacyMode = true  // Always client-side processing
   const [processingStatus, setProcessingStatus] = useState<string>('')
 
   // Commentary state
@@ -696,44 +697,33 @@ function App() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }}
             >
-              <h2>Choose Your Mode</h2>
-              <div className="deployment-options-grid">
-                <div className="deployment-option option-local">
-                  <span className="deploy-badge best">⭐ MOST PRIVATE</span>
-                  <h3>🖥️ Fully Local</h3>
-                  <p>Download and run on your machine. Suitable for privileged documents.</p>
-                  <a 
-                    href="https://github.com/jamescockburn47/hallucinationauditor/releases" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="deploy-btn primary"
-                  >
-                    Download .exe →
-                  </a>
+              <h2>How It Works</h2>
+              <div className="how-it-works-summary">
+                <div className="step-item">
+                  <span className="step-num">1</span>
+                  <div className="step-content">
+                    <strong>Document Parsing</strong>
+                    <p>Your document is parsed <em>in your browser</em>. The file never leaves your device.</p>
+                  </div>
                 </div>
-                <div className={`deployment-option option-hybrid ${privacyMode ? 'selected' : ''}`}>
-                  <span className="deploy-badge good">✓ PRIVATE</span>
-                  <h3>🔀 Hybrid Mode</h3>
-                  <p>Documents parsed in browser. Only citations sent to server.</p>
-                  <button 
-                    className={`deploy-btn ${privacyMode ? 'active' : 'secondary'}`}
-                    onClick={() => setPrivacyMode(true)}
-                  >
-                    {privacyMode ? '✓ Selected' : 'Use Hybrid →'}
-                  </button>
+                <div className="step-item">
+                  <span className="step-num">2</span>
+                  <div className="step-content">
+                    <strong>Citation Resolution</strong>
+                    <p>Only citation strings (e.g., "[2019] UKSC 12") are sent to our server to find the cases on BAILII.</p>
+                  </div>
                 </div>
-                <div className={`deployment-option option-online ${!privacyMode ? 'selected' : ''}`}>
-                  <span className="deploy-badge caution">⚠ NOT PRIVATE</span>
-                  <h3>☁️ Fully Online</h3>
-                  <p>Fastest. Do NOT use for privileged documents.</p>
-                  <button 
-                    className={`deploy-btn ${!privacyMode ? 'active' : 'tertiary'}`}
-                    onClick={() => setPrivacyMode(false)}
-                  >
-                    {!privacyMode ? '✓ Selected' : 'Use Online →'}
-                  </button>
+                <div className="step-item">
+                  <span className="step-num">3</span>
+                  <div className="step-content">
+                    <strong>Verification</strong>
+                    <p>Case text is fetched and compared against your claims <em>in your browser</em>.</p>
+                  </div>
                 </div>
               </div>
+              <p className="privacy-note">
+                <ShieldCheck size={16} /> <strong>Privacy:</strong> Your document content never leaves your browser. Only citation strings are processed by our server.
+              </p>
             </motion.section>
 
             {/* Document Upload Section */}
@@ -911,27 +901,6 @@ function App() {
                     </motion.div>
                   ))}
                 </AnimatePresence>
-              </div>
-
-              {/* Privacy Mode Toggle */}
-              <div className="search-settings privacy-settings">
-                <label className="consent-toggle">
-                  <input 
-                    type="checkbox" 
-                    checked={privacyMode}
-                    onChange={(e) => setPrivacyMode(e.target.checked)}
-                  />
-                  <span className={`toggle-switch ${privacyMode ? 'privacy-on' : ''}`}></span>
-                  <span className="toggle-label">
-                    {privacyMode ? <ShieldCheck size={16} /> : <Shield size={16} />}
-                    Privacy mode {privacyMode ? 'ON' : 'OFF'}
-                  </span>
-                </label>
-                <p className={`consent-description ${privacyMode ? 'privacy-enabled' : 'privacy-disabled'}`}>
-                  {privacyMode 
-                    ? '✓ Document parsing happens locally in your browser. Only citation strings are sent to the server for resolution.'
-                    : '⚠ Document will be sent to server for processing (not stored).'}
-                </p>
               </div>
 
               {/* Web Search Consent */}
