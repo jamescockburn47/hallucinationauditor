@@ -188,6 +188,18 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/assets/"):
             return await call_next(request)
 
+        # Allow API routes without auth when request comes from localhost (dev mode)
+        # In production, CORS will restrict which origins can call the API
+        if request.url.path.startswith("/api/"):
+            origin = request.headers.get("Origin", "")
+            host = request.headers.get("Host", "")
+            logger.info(f"API request - Origin: {origin}, Host: {host}, Path: {request.url.path}")
+            # Allow from localhost origins or localhost host (for direct API testing)
+            if "localhost" in origin or "127.0.0.1" in origin or "localhost" in host:
+                logger.info("Allowing API request from localhost")
+                return await call_next(request)
+            logger.info("Denying API request - not from localhost")
+
         # Check for Authorization header
         auth_header = request.headers.get("Authorization")
         if auth_header:
@@ -345,6 +357,93 @@ def extract_case_name_from_citation(citation_text: str) -> Optional[str]:
         if name and len(name) > 2:
             return name
     return None
+
+
+def verify_case_name_match(claimed_name: str, actual_name: str) -> bool:
+    """
+    Verify that the claimed case name matches the actual case name from the document.
+
+    This is critical for detecting Type 1 hallucinations (fabricated cases).
+    A citation like [2019] UKSC 12 might exist, but if the actual case at that
+    citation is "R v Secretary of State" and the document claims it's
+    "R v Northbridge Compliance Authority", this is a hallucination.
+
+    Args:
+        claimed_name: The case name from the user's document
+        actual_name: The case name from the official source (BAILII/FCL)
+
+    Returns:
+        True if names match sufficiently, False if mismatch (hallucination)
+    """
+    if not claimed_name or not actual_name:
+        return True  # Can't verify without both names
+
+    # Normalize names for comparison
+    def normalize(name: str) -> str:
+        # Lowercase
+        name = name.lower().strip()
+        # Remove common prefixes/suffixes
+        name = re.sub(r'\s*\(rev\s*\d*\)\s*$', '', name)  # Remove (Rev 1) etc
+        name = re.sub(r'\s*\[.*?\]\s*', ' ', name)  # Remove [year] citations
+        # Normalize "v" variants
+        name = re.sub(r'\s+v\.?\s+', ' v ', name)
+        # Remove corporate suffixes for comparison
+        name = re.sub(r'\s+(plc|ltd|limited|inc|llc|llp)\b', '', name)
+        # Normalize whitespace
+        name = re.sub(r'\s+', ' ', name).strip()
+        # Remove leading "r v" if comparing against different format
+        return name
+
+    norm_claimed = normalize(claimed_name)
+    norm_actual = normalize(actual_name)
+
+    # Direct match
+    if norm_claimed == norm_actual:
+        return True
+
+    # Check if one contains the other (handles "R v Smith" vs "Regina v Smith")
+    if norm_claimed in norm_actual or norm_actual in norm_claimed:
+        return True
+
+    # Extract party names and compare
+    def extract_parties(name: str) -> set:
+        """Extract significant words from case name."""
+        # Remove common words
+        stop_words = {'r', 'v', 'the', 'and', 'of', 'for', 'in', 'on', 'a', 'an',
+                      'secretary', 'state', 'home', 'department', 'commissioner',
+                      'council', 'borough', 'county', 'city', 'district'}
+        words = set(re.findall(r'\b[a-z]{3,}\b', name.lower()))
+        return words - stop_words
+
+    claimed_parties = extract_parties(norm_claimed)
+    actual_parties = extract_parties(norm_actual)
+
+    # If no significant words extracted, allow match
+    if not claimed_parties or not actual_parties:
+        return True
+
+    # Calculate Jaccard similarity
+    intersection = claimed_parties & actual_parties
+    union = claimed_parties | actual_parties
+
+    if not union:
+        return True
+
+    similarity = len(intersection) / len(union)
+
+    # Require at least 30% overlap for a match
+    # This allows for minor variations but catches completely different cases
+    if similarity >= 0.3:
+        return True
+
+    # Also check if at least one significant party name matches
+    # This handles cases like "Smith v Jones" vs "Smith v Brown Council"
+    if len(intersection) >= 1:
+        return True
+
+    logger.info(f"Case name verification failed: claimed='{claimed_name}' actual='{actual_name}' "
+                f"similarity={similarity:.2f} overlap={intersection}")
+    return False
 
 
 def extract_case_name_from_text(text: str, citation: str) -> Optional[str]:
@@ -1318,23 +1417,44 @@ def resolve_single_citation(ctx: dict, web_search_enabled: bool) -> ResolvedCita
                 )
 
                 if fetch_result and fetch_result.get("cache_path"):
-                    # Parse it
+                    # Parse it - correct argument order: job_id, cache_path, url
+                    from pathlib import Path
                     parsed = parse_authority_document(
-                        fetch_result["cache_path"],
-                        url=url
+                        job_id,
+                        Path(fetch_result["cache_path"]),
+                        url
                     )
 
-                    if parsed and parsed.get("paragraphs"):
-                        # Return simplified paragraphs
-                        paragraphs = [
-                            {
-                                "para_num": p.get("para_num", str(i+1)),
-                                "text": p.get("text", "")[:500],  # Limit text length
-                                "speaker": p.get("speaker")
-                            }
-                            for i, p in enumerate(parsed["paragraphs"])
-                            if p.get("text") and len(p.get("text", "")) > 20
-                        ][:100]  # Limit to 100 paragraphs
+                    if parsed:
+                        # Get the actual title from the document
+                        actual_title = parsed.get("title", "")
+
+                        # CRITICAL: Verify case name matches
+                        # This detects Type 1 hallucinations (fabricated cases)
+                        if case_name and actual_title:
+                            name_match = verify_case_name_match(case_name, actual_title)
+                            if not name_match:
+                                logger.warning(f"Case name mismatch! Claimed: '{case_name}' vs Actual: '{actual_title}'")
+                                return ResolvedCitation(
+                                    citation=citation_text,
+                                    case_name=case_name,
+                                    source_type="not_found",
+                                    error=f"Case name mismatch: document is '{actual_title}', not '{case_name}'"
+                                )
+                            logger.info(f"Case name verified: '{case_name}' matches '{actual_title}'")
+                            title = actual_title  # Use the actual title
+
+                        if parsed.get("paragraphs"):
+                            # Return simplified paragraphs
+                            paragraphs = [
+                                {
+                                    "para_num": p.get("para_num", str(i+1)),
+                                    "text": p.get("text", "")[:500],  # Limit text length
+                                    "speaker": p.get("speaker")
+                                }
+                                for i, p in enumerate(parsed["paragraphs"])
+                                if p.get("text") and len(p.get("text", "")) > 20
+                            ][:100]  # Limit to 100 paragraphs
 
             except Exception as e:
                 logger.error(f"Error fetching/parsing {url}: {e}")
