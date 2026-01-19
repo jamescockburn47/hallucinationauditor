@@ -307,59 +307,42 @@ export interface SourceParagraph {
   citationPosition: number; // Character position of citation in paragraph
 }
 
-/**
- * Extract propositions/claims from text around citations
- * Returns the actual source paragraph from the document
- */
-export function extractPropositions(text: string): Array<{
-  proposition: string;
-  sourceParagraph: SourceParagraph;
-  citations: ExtractedCitation[];
-}> {
-  const results: Array<{
-    proposition: string;
-    sourceParagraph: SourceParagraph;
-    citations: ExtractedCitation[];
-  }> = [];
+export interface CitationWithContext extends ExtractedCitation {
+  sourceParagraph?: SourceParagraph;
+}
 
-  // Split into paragraphs (double newline or numbered paragraphs)
+/**
+ * Extract all citations from text with their source paragraphs
+ * Each citation is returned separately with the paragraph where it was found
+ */
+export function extractCitationsWithContext(text: string): CitationWithContext[] {
+  const results: CitationWithContext[] = [];
+  const seen = new Set<string>();
+
+  // Split into paragraphs
   const paragraphs = splitIntoParagraphs(text);
 
-  for (let paraIndex = 0; paraIndex < paragraphs.length; paraIndex++) {
-    const para = paragraphs[paraIndex];
+  for (const para of paragraphs) {
+    // Find all citations in this paragraph
     const citations = extractCitations(para.text);
 
-    if (citations.length > 0) {
-      // Find position of first citation in paragraph
-      const firstCitationMatch = para.text.match(/\[\d{4}\]/);
-      const citationPosition = firstCitationMatch?.index || 0;
+    for (const cit of citations) {
+      const key = cit.raw.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
 
-      // The proposition is the cleaned version for matching
-      let proposition = para.text
-        .replace(/\[\d{4}\]\s+(?:UKSC|UKPC|UKHL|EWCA|EWHC|UKUT|UKEAT|CSIH|CSOH)[^\]]*\d+/gi, '')
-        .replace(/\[\d{4}\]\s+\d*\s*(?:AC|QB|Ch|Fam|WLR|All\s+ER)\s+\d+/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+      // Find the position of this citation in the paragraph
+      const citationMatch = para.text.indexOf(cit.raw);
+      const citationPosition = citationMatch >= 0 ? citationMatch : 0;
 
-      // Remove citation artifacts
-      proposition = proposition
-        .replace(/\s*,\s*,/g, ',')
-        .replace(/\s+\./g, '.')
-        .replace(/^\s*[,;]\s*/, '')
-        .replace(/\s*[,;]\s*$/, '')
-        .trim();
-
-      if (proposition.length > 20) {
-        results.push({
-          proposition,
-          sourceParagraph: {
-            paragraphNumber: para.number,
-            text: para.text.trim(),
-            citationPosition
-          },
-          citations
-        });
-      }
+      results.push({
+        ...cit,
+        sourceParagraph: {
+          paragraphNumber: para.number,
+          text: para.text.trim(),
+          citationPosition
+        }
+      });
     }
   }
 

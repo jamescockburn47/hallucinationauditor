@@ -23,8 +23,8 @@ import './App.css'
 
 // Client-side processing for privacy mode
 import { extractTextFromFile } from './lib/documentParser'
-import { extractCitations, extractPropositions, formatCitation, extractCaseNameFromText } from './lib/citationExtractor'
-import { findMatchingParagraphs, calculateConfidence, determineOutcome } from './lib/verifier'
+import { extractCitationsWithContext } from './lib/citationExtractor'
+// Verifier functions removed - user verifies manually using the judgment viewer
 import { resolveCitations } from './lib/api'
 
 interface SourceParagraph {
@@ -43,24 +43,16 @@ interface ExtractedCitationItem {
   id: string
   caseName: string | null
   citation: string
-  proposition: string
-  sourceParagraph?: SourceParagraph  // The actual paragraph from the document
+  sourceParagraph?: SourceParagraph  // The actual paragraph from the document where citation appears
   status: 'pending' | 'resolving' | 'verifying' | 'done' | 'error'
   result?: {
-    outcome: 'supported' | 'contradicted' | 'unclear' | 'unverifiable' | 'needs_review'
+    outcome: 'verified' | 'not_found' | 'needs_review'
     caseFound: boolean
     sourceType?: string
     url?: string
     title?: string
-    confidence?: number
     notes?: string
     judgmentParagraphs?: JudgmentParagraph[]  // Full judgment for embedded viewer
-    matchingParagraphs?: Array<{
-      para_num: string
-      text: string
-      similarity_score: number
-      match_type: 'keyword' | 'partial'
-    }>
   }
 }
 
@@ -179,44 +171,22 @@ function App() {
       // Store document text for the document viewer (locally only)
       setDocumentText(text)
 
-      const propositions = extractPropositions(text)
+      // Extract citations with their source paragraphs (for context)
+      const citationsWithContext = extractCitationsWithContext(text)
 
-      if (propositions.length > 0) {
-        const items: ExtractedCitationItem[] = []
-        propositions.forEach((prop, i) => {
-          prop.citations.forEach((cit, j) => {
-            // Try to get case name from citation first, then from proposition text
-            const caseName = cit.caseName || extractCaseNameFromText(prop.proposition) || null
-            items.push({
-              id: `${i}-${j}`,
-              caseName,
-              citation: cit.raw,
-              proposition: prop.proposition,
-              sourceParagraph: prop.sourceParagraph,  // Store the actual document paragraph
-              status: 'pending'
-            })
-          })
-        })
+      if (citationsWithContext.length > 0) {
+        const items: ExtractedCitationItem[] = citationsWithContext.map((cit, i) => ({
+          id: `cit-${i}`,
+          caseName: cit.caseName || null,
+          citation: cit.raw,
+          sourceParagraph: cit.sourceParagraph,  // The paragraph where citation was found
+          status: 'pending'
+        }))
         setExtractedCitations(items)
         setDocumentTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
         setView('audit')
       } else {
-        // Try just citations
-        const citations = extractCitations(text)
-        if (citations.length > 0) {
-          const items: ExtractedCitationItem[] = citations.slice(0, 30).map((cit, i) => ({
-            id: `cit-${i}`,
-            caseName: cit.caseName || null,
-            citation: cit.raw,
-            proposition: `Citation reference: ${formatCitation(cit)}`,
-            status: 'pending'
-          }))
-          setExtractedCitations(items)
-          setDocumentTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
-          setView('audit')
-        } else {
-          setError('No legal citations found in the document')
-        }
+        setError('No legal citations found in the document')
       }
     } catch (err: any) {
       console.error('Extraction error:', err)
@@ -241,19 +211,15 @@ function App() {
 
     try {
       // Build citations with context for resolution
-      type CitationWithContext = { citation: string; case_name?: string | null; claim_text?: string | null }
+      type CitationWithContext = { citation: string; case_name?: string | null }
       const citationMap = new Map<string, CitationWithContext>()
 
       extractedCitations.forEach(item => {
         const key = item.citation.toLowerCase()
         if (!citationMap.has(key)) {
-          // Use the case name we already extracted, or try again from proposition
-          const caseName = item.caseName || extractCaseNameFromText(item.proposition) || null
-
           citationMap.set(key, {
             citation: item.citation,
-            case_name: caseName,
-            claim_text: item.proposition.slice(0, 200)
+            case_name: item.caseName
           })
         }
       })
@@ -272,73 +238,44 @@ function App() {
         resolvedMap.set(r.citation.toLowerCase(), r)
       })
 
-      setAuditProgress({ current: 0, total, phase: 'Verifying claims...' })
+      setAuditProgress({ current: 0, total, phase: 'Processing results...' })
 
-      // Now verify each citation
+      // Process each citation
       const updatedCitations = [...extractedCitations]
 
       for (let i = 0; i < updatedCitations.length; i++) {
         const item = updatedCitations[i]
-
-        // Update status to verifying
-        updatedCitations[i] = { ...item, status: 'verifying' }
-        setExtractedCitations([...updatedCitations])
-        setAuditProgress({ current: i + 1, total, phase: `Verifying ${i + 1} of ${total}...` })
+        setAuditProgress({ current: i + 1, total, phase: `Processing ${i + 1} of ${total}...` })
 
         const resolved = resolvedMap.get(item.citation.toLowerCase())
 
         if (resolved && resolved.source_type !== 'not_found') {
-          // Case found - verify
-          const matches = findMatchingParagraphs(
-            item.proposition,
-            resolved.paragraphs.map(p => ({
-              para_num: p.para_num,
-              text: p.text,
-              speaker: p.speaker || undefined
-            }))
-          )
-
-          const { score } = calculateConfidence(matches, true)
-          const outcome = determineOutcome(
-            true,
-            matches,
-            resolved.source_type as 'fcl' | 'bailii' | 'web_search' | 'not_found'
-          )
-
+          // Case found on BAILII/FCL
           updatedCitations[i] = {
             ...item,
             caseName: resolved.case_name || item.caseName,
             status: 'done',
             result: {
-              outcome,
+              outcome: 'verified',
               caseFound: true,
               sourceType: resolved.source_type,
               url: resolved.url || undefined,
               title: resolved.title || undefined,
-              confidence: Math.round(score * 100),
-              notes: matches.length > 0
-                ? `Case verified. Found ${matches.length} matching paragraph(s).`
-                : 'Case verified on BAILII/FCL. No keyword matches for proposition specifics.',
+              notes: `Case found on ${resolved.source_type === 'fcl' ? 'Find Case Law' : 'BAILII'}`,
               judgmentParagraphs: resolved.paragraphs.map(p => ({
                 para_num: p.para_num,
                 text: p.text,
                 speaker: p.speaker
-              })),
-              matchingParagraphs: matches.map(m => ({
-                para_num: m.para_num,
-                text: m.text.slice(0, 400) + (m.text.length > 400 ? '...' : ''),
-                similarity_score: m.similarity_score,
-                match_type: m.match_type
               }))
             }
           }
         } else {
-          // Case not found
+          // Case not found - potential hallucination
           updatedCitations[i] = {
             ...item,
             status: 'done',
             result: {
-              outcome: 'unverifiable',
+              outcome: 'not_found',
               caseFound: false,
               notes: resolved?.error || 'Citation could not be found on BAILII or Find Case Law'
             }
@@ -366,8 +303,8 @@ function App() {
     const counts = { verified: 0, needsReview: 0, notFound: 0, pending: 0 }
     extractedCitations.forEach(c => {
       if (c.status !== 'done') counts.pending++
-      else if (c.result?.outcome === 'supported') counts.verified++
-      else if (c.result?.caseFound === false) counts.notFound++
+      else if (c.result?.outcome === 'verified') counts.verified++
+      else if (c.result?.outcome === 'not_found') counts.notFound++
       else counts.needsReview++
     })
     return counts
@@ -380,9 +317,8 @@ function App() {
     const newId = `manual-${Date.now()}`
     const newItem: ExtractedCitationItem = {
       id: newId,
-      caseName: manualCaseName.trim() || extractCaseNameFromText(manualCitation) || null,
+      caseName: manualCaseName.trim() || null,
       citation: manualCitation.trim(),
-      proposition: 'Manually added citation',
       status: 'pending'
     }
 
@@ -746,9 +682,9 @@ function App() {
                       {item.status === 'pending' && <div className="status-dot pending" />}
                       {item.status === 'resolving' && <Loader2 size={14} className="spinning" />}
                       {item.status === 'verifying' && <Loader2 size={14} className="spinning" />}
-                      {item.status === 'done' && item.result?.outcome === 'supported' && <CheckCircle2 size={14} className="icon-verified" />}
-                      {item.status === 'done' && item.result?.caseFound === false && <XCircle size={14} className="icon-not-found" />}
-                      {item.status === 'done' && item.result?.caseFound && item.result?.outcome !== 'supported' && <AlertCircle size={14} className="icon-review" />}
+                      {item.status === 'done' && item.result?.outcome === 'verified' && <CheckCircle2 size={14} className="icon-verified" />}
+                      {item.status === 'done' && item.result?.outcome === 'not_found' && <XCircle size={14} className="icon-not-found" />}
+                      {item.status === 'done' && item.result?.outcome === 'needs_review' && <AlertCircle size={14} className="icon-review" />}
                     </div>
                     <div className="citation-item-content">
                       <span className="citation-case-name">{item.caseName || 'Unknown Case'}</span>
@@ -876,14 +812,11 @@ function App() {
                     <div className={`outcome-badge large ${selectedItem.result?.outcome || 'pending'}`}>
                       {selectedItem.status === 'pending' && 'Pending'}
                       {selectedItem.status === 'resolving' && 'Resolving...'}
-                      {selectedItem.status === 'verifying' && 'Verifying...'}
-                      {selectedItem.status === 'done' && selectedItem.result?.outcome === 'supported' && 'Verified'}
-                      {selectedItem.status === 'done' && selectedItem.result?.caseFound === false && 'Case Not Found'}
-                      {selectedItem.status === 'done' && selectedItem.result?.caseFound && selectedItem.result?.outcome !== 'supported' && 'Needs Review'}
+                      {selectedItem.status === 'verifying' && 'Processing...'}
+                      {selectedItem.status === 'done' && selectedItem.result?.outcome === 'verified' && 'Case Found'}
+                      {selectedItem.status === 'done' && selectedItem.result?.outcome === 'not_found' && 'Not Found'}
+                      {selectedItem.status === 'done' && selectedItem.result?.outcome === 'needs_review' && 'Needs Review'}
                     </div>
-                    {selectedItem.result?.confidence !== undefined && selectedItem.result.confidence > 0 && (
-                      <span className="confidence-score">{selectedItem.result.confidence}% match</span>
-                    )}
                   </div>
 
                   <div className="detail-section">
@@ -955,7 +888,6 @@ function App() {
                       <div className="judgment-content">
                         {(() => {
                           const searchLower = judgmentSearch.toLowerCase()
-                          const matchingParaNums = new Set(selectedItem.result?.matchingParagraphs?.map(m => m.para_num) || [])
 
                           const filteredParas = judgmentSearch
                             ? selectedItem.result?.judgmentParagraphs?.filter(p =>
@@ -969,7 +901,6 @@ function App() {
                           }
 
                           return filteredParas.map((para, idx) => {
-                            const isMatch = matchingParaNums.has(para.para_num)
                             let displayText = para.text
 
                             // Highlight search terms
@@ -981,13 +912,12 @@ function App() {
                             return (
                               <div
                                 key={idx}
-                                className={`judgment-para ${isMatch ? 'highlighted' : ''}`}
+                                className="judgment-para"
                                 id={`para-${para.para_num}`}
                               >
                                 <span className="para-num">[{para.para_num}]</span>
                                 {para.speaker && <span className="para-speaker">{para.speaker}:</span>}
                                 <p dangerouslySetInnerHTML={{ __html: displayText }} />
-                                {isMatch && <span className="match-indicator">Match</span>}
                               </div>
                             )
                           })
