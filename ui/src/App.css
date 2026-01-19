@@ -1784,6 +1784,85 @@ html, body {
   align-items: center;
   gap: 1rem;
   margin: 1.5rem 0;
+  width: 100%;
+  max-width: 600px;
+}
+
+/* Input Divider */
+.input-divider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+
+.input-divider::before,
+.input-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.input-divider span {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Paste Textarea */
+.paste-textarea {
+  width: 100%;
+  min-height: 150px;
+  padding: 1rem;
+  background: var(--color-bg-card);
+  border: 2px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  resize: vertical;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.paste-textarea::placeholder {
+  color: var(--color-text-dim);
+}
+
+.paste-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  background: rgba(212, 168, 85, 0.03);
+}
+
+.paste-textarea:not(:placeholder-shown) {
+  border-style: solid;
+  border-color: var(--color-accent);
+}
+
+/* Mobile touch improvements */
+@media (max-width: 768px) {
+  .upload-zone-large {
+    padding: 2rem 1rem;
+    min-height: 120px;
+  }
+
+  .paste-textarea {
+    min-height: 120px;
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+
+  .upload-prompt-large svg {
+    width: 36px;
+    height: 36px;
+  }
+
+  .upload-text {
+    font-size: 0.9rem;
+  }
 }
 
 /* What We Check Section */

@@ -19,9 +19,7 @@ import {
   Eye,
   EyeOff,
   HelpCircle,
-  Shield,
-  Database,
-  FileCheck
+  Shield
 } from 'lucide-react'
 import './App.css'
 
@@ -158,22 +156,30 @@ function App() {
     }
   }
 
-  // Extract citations from document
+  // Extract citations from document or pasted text
   const extractFromDocument = async () => {
-    if (!uploadedFile) return
+    // Allow either file upload or pasted text
+    if (!uploadedFile && documentText.trim().length < 50) return
 
     setIsExtracting(true)
     setError(null)
 
     try {
-      const text = await extractTextFromFile(uploadedFile)
+      let text: string
 
-      if (!text || text.trim().length < 50) {
-        throw new Error('Could not extract text from document')
+      if (uploadedFile) {
+        // Extract from uploaded file
+        text = await extractTextFromFile(uploadedFile)
+        // Store document text for the document viewer (locally only)
+        setDocumentText(text)
+      } else {
+        // Use pasted text directly
+        text = documentText
       }
 
-      // Store document text for the document viewer (locally only)
-      setDocumentText(text)
+      if (!text || text.trim().length < 50) {
+        throw new Error('Could not extract text - please provide more content')
+      }
 
       // Extract citations with their source paragraphs (for context)
       const citationsWithContext = extractCitationsWithContext(text)
@@ -187,14 +193,14 @@ function App() {
           status: 'pending'
         }))
         setExtractedCitations(items)
-        setDocumentTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
+        setDocumentTitle(uploadedFile ? uploadedFile.name.replace(/\.[^/.]+$/, '') : 'Pasted Text')
         setView('audit')
       } else {
-        setError('No legal citations found in the document')
+        setError('No legal citations found in the text')
       }
     } catch (err: any) {
       console.error('Extraction error:', err)
-      setError(err.message || 'Failed to extract citations from document')
+      setError(err.message || 'Failed to extract citations')
     } finally {
       setIsExtracting(false)
     }
@@ -664,7 +670,7 @@ function App() {
           </motion.div>
         )}
 
-        {/* Upload View - Landing Page */}
+        {/* Upload View - Simple Upload Page */}
         {view === 'upload' && (
           <motion.div
             className="upload-view"
@@ -675,41 +681,6 @@ function App() {
             <div className="landing-hero">
               <h1>Citation Auditor</h1>
               <p className="hero-subtitle">Verify legal citations against official databases</p>
-              <p className="hero-description">
-                Upload a legal document to check whether cited cases exist on BAILII and Find Case Law.
-                Identifies potential Type 1 hallucinations where AI has fabricated case names or citations.
-              </p>
-            </div>
-
-            {/* How It Works Section */}
-            <div className="how-it-works-section">
-              <h2>How It Works</h2>
-              <div className="steps-grid">
-                <div className="step-card">
-                  <div className="step-number">1</div>
-                  <div className="step-icon"><Shield size={24} /></div>
-                  <h3>Local Processing</h3>
-                  <p>Your document is processed entirely in your browser. The content never leaves your device - only citation strings are sent for verification.</p>
-                </div>
-                <div className="step-card">
-                  <div className="step-number">2</div>
-                  <div className="step-icon"><FileSearch size={24} /></div>
-                  <h3>Citation Extraction</h3>
-                  <p>We extract all legal citations (e.g., [2020] UKSC 15, [1990] 2 AC 605) and identify the case names from your document.</p>
-                </div>
-                <div className="step-card">
-                  <div className="step-number">3</div>
-                  <div className="step-icon"><Database size={24} /></div>
-                  <h3>Database Lookup</h3>
-                  <p>Each citation is checked against BAILII and Find Case Law. We verify the case exists and the name matches.</p>
-                </div>
-                <div className="step-card">
-                  <div className="step-number">4</div>
-                  <div className="step-icon"><FileCheck size={24} /></div>
-                  <h3>Manual Review</h3>
-                  <p>View the actual judgment text alongside your document to verify the legal propositions yourself.</p>
-                </div>
-              </div>
             </div>
 
             {/* Upload Section */}
@@ -717,7 +688,7 @@ function App() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.txt,.html,.doc,.docx"
+                accept=".pdf,.txt,.html,.doc,.docx,application/pdf,text/plain,text/html,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={handleFileInput}
                 style={{ display: 'none' }}
               />
@@ -744,13 +715,27 @@ function App() {
                 ) : (
                   <div className="upload-prompt-large">
                     <Upload size={48} />
-                    <span className="upload-text">Drop your document here or click to browse</span>
+                    <span className="upload-text">Drop your document here or tap to browse</span>
                     <span className="file-types">PDF, Word, TXT, HTML</span>
                   </div>
                 )}
               </div>
 
-              {uploadedFile && (
+              <div className="input-divider">
+                <span>or paste text directly</span>
+              </div>
+
+              <textarea
+                className="paste-textarea"
+                placeholder="Paste LLM output or any text containing legal citations here..."
+                value={documentText}
+                onChange={(e) => {
+                  setDocumentText(e.target.value)
+                  setUploadedFile(null) // Clear file if user pastes text
+                }}
+              />
+
+              {(uploadedFile || documentText.trim().length > 50) && (
                 <button
                   className="extract-btn-large"
                   onClick={extractFromDocument}
@@ -778,38 +763,10 @@ function App() {
               )}
             </div>
 
-            {/* What We Check Section */}
-            <div className="what-we-check">
-              <h2>What We Detect</h2>
-              <div className="detection-cards">
-                <div className="detection-card found">
-                  <CheckCircle2 size={20} />
-                  <div>
-                    <strong>Case Found</strong>
-                    <p>Citation exists in BAILII/FCL and case name matches</p>
-                  </div>
-                </div>
-                <div className="detection-card not-found">
-                  <XCircle size={20} />
-                  <div>
-                    <strong>Not Found (Type 1)</strong>
-                    <p>Citation cannot be found - may be fabricated</p>
-                  </div>
-                </div>
-                <div className="detection-card mismatch">
-                  <AlertCircle size={20} />
-                  <div>
-                    <strong>Name Mismatch (Type 2)</strong>
-                    <p>Citation exists but refers to a different case</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* Privacy Note */}
             <div className="privacy-note">
               <Shield size={16} />
-              <span>Your documents are processed locally and never stored on our servers</span>
+              <span>Your text is processed locally and never stored on our servers</span>
             </div>
           </motion.div>
         )}
