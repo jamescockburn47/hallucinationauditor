@@ -47,38 +47,49 @@ const TRADITIONAL_CITATION_PATTERNS = [
   /\[(\d{4})\]\s+(\d+)\s+Cr\s+App\s+R\s+(\d+)/gi,
 ];
 
-// Pattern to extract case name before citation
+// Pattern to extract case name - look for "Party v Party" patterns
 const CASE_NAME_PATTERNS = [
-  // "Case Name [YEAR] ..." - name before bracketed year
-  /([A-Z][a-zA-Z\s,.'&()-]+(?:\s+v\.?\s+[A-Z][a-zA-Z\s,.'&()-]+)?)\s*\[\d{4}\]/,
-  // "R v Defendant" pattern
-  /\b(R\s+v\.?\s+[A-Z][a-zA-Z\s,.'&()-]+)\s*\[/i,
-  // "Re Something" pattern
-  /(Re\s+[A-Z][a-zA-Z\s,.'&()-]+)\s*\[/i,
+  // Standard "Party v Party" or "Party v. Party" - most common pattern
+  /([A-Z][A-Za-z''\-\.]+(?:\s+(?:Industries|Holdings|plc|Ltd|Co|Corporation|Corp|Inc|Limited|LLP|LLC))?)\s+v\.?\s+([A-Z][A-Za-z''\-\.]+(?:\s+(?:and\s+(?:Others?|Another|Ors))?)?)/i,
+  // "R v Defendant" pattern (criminal cases)
+  /\b(R)\s+(v\.?)\s+([A-Z][A-Za-z''\-\.]+)/i,
+  // "Re Something" pattern (in the matter of)
+  /\b((?:In\s+)?[Rr]e)\s+([A-Z][A-Za-z''\-\.]+)/i,
 ];
 
 /**
- * Extract case name from the text preceding a citation
+ * Extract case name from text - looks for "v" patterns anywhere in text
+ */
+export function extractCaseNameFromText(text: string): string | undefined {
+  // Try each pattern
+  for (const pattern of CASE_NAME_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) {
+      // For "R v X" pattern
+      if (match[1] === 'R' && match[2] && match[3]) {
+        return `R v ${match[3]}`;
+      }
+      // For "Re X" pattern
+      if (match[1] && match[1].toLowerCase().includes('re') && match[2]) {
+        return `${match[1]} ${match[2]}`;
+      }
+      // For standard "Party v Party" pattern
+      if (match[1] && match[2]) {
+        return `${match[1]} v ${match[2]}`;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract case name from the text preceding a citation (legacy)
  */
 function extractCaseName(textBefore: string): string | undefined {
   // Look at the last 200 characters before the citation
   const context = textBefore.slice(-200);
-  
-  for (const pattern of CASE_NAME_PATTERNS) {
-    const match = context.match(pattern);
-    if (match && match[1]) {
-      // Clean up the case name
-      let name = match[1].trim();
-      // Remove common prefixes like "in" or "see"
-      name = name.replace(/^(in|see|cf\.?|per)\s+/i, '');
-      // Don't return if it's too short or looks like a false positive
-      if (name.length > 3 && name.length < 100) {
-        return name;
-      }
-    }
-  }
-  
-  return undefined;
+  return extractCaseNameFromText(context);
 }
 
 /**

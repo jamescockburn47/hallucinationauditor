@@ -19,7 +19,7 @@ import './App.css'
 
 // Client-side processing for privacy mode
 import { extractTextFromFile } from './lib/documentParser'
-import { extractCitations, extractPropositions, formatCitation } from './lib/citationExtractor'
+import { extractCitations, extractPropositions, formatCitation, extractCaseNameFromText } from './lib/citationExtractor'
 import { findMatchingParagraphs, calculateConfidence, determineOutcome } from './lib/verifier'
 import { resolveCitations } from './lib/api'
 
@@ -149,9 +149,11 @@ function App() {
         const items: ExtractedCitationItem[] = []
         propositions.forEach((prop, i) => {
           prop.citations.forEach((cit, j) => {
+            // Try to get case name from citation first, then from proposition text
+            const caseName = cit.caseName || extractCaseNameFromText(prop.proposition) || null
             items.push({
               id: `${i}-${j}`,
-              caseName: cit.caseName || null,
+              caseName,
               citation: cit.raw,
               proposition: prop.proposition,
               status: 'pending'
@@ -208,22 +210,8 @@ function App() {
       extractedCitations.forEach(item => {
         const key = item.citation.toLowerCase()
         if (!citationMap.has(key)) {
-          // Extract case name from proposition if not already present
-          let caseName = item.caseName
-          if (!caseName) {
-            const caseNamePatterns = [
-              /([A-Z][A-Za-z'\-\.]+(?:\s+(?:Industries|Holdings|plc|Ltd|Co))*\s+v\.?\s+[A-Z][A-Za-z'\-\.]+(?:\s+(?:and\s+(?:Others?|Another|Ors))?)?)/i,
-              /(R\s+v\.?\s+[A-Z][A-Za-z'\-\.]+)/i,
-              /((?:In\s+)?[Rr]e\s+[A-Z][A-Za-z'\-\.]+)/i,
-            ]
-            for (const pattern of caseNamePatterns) {
-              const match = item.proposition.match(pattern)
-              if (match) {
-                caseName = match[1].trim()
-                break
-              }
-            }
-          }
+          // Use the case name we already extracted, or try again from proposition
+          const caseName = item.caseName || extractCaseNameFromText(item.proposition) || null
 
           citationMap.set(key, {
             citation: item.citation,
