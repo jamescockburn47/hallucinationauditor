@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Scale,
@@ -6,18 +6,14 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
-  Plus,
-  Trash2,
   Loader2,
   BookOpen,
-  Sparkles,
   Upload,
   FileText,
   X,
-  MessageSquareQuote,
-  Gavel,
-  Search,
-  ShieldCheck
+  Info,
+  ExternalLink,
+  ChevronRight
 } from 'lucide-react'
 import './App.css'
 
@@ -27,167 +23,67 @@ import { extractCitations, extractPropositions, formatCitation } from './lib/cit
 import { findMatchingParagraphs, calculateConfidence, determineOutcome } from './lib/verifier'
 import { resolveCitations } from './lib/api'
 
-interface Citation {
-  raw: string
-}
-
-interface Claim {
+interface ExtractedCitationItem {
   id: string
-  text: string
-  citations: Citation[]
-}
-
-interface MatchingParagraph {
-  para_num: string
-  text: string
-  similarity_score: number
-  match_type: 'keyword' | 'partial'
-}
-
-interface VerificationResult {
-  claim_id: string
-  text: string
-  citations: {
-    citation_id: string
-    citation_text: string
-    case_name?: string | null
-    outcome: 'supported' | 'contradicted' | 'unclear' | 'unverifiable' | 'needs_review'
-    hallucination_type?: string | null
-    hallucination_type_name?: string | null
-    authority_url?: string | null
-    authority_title?: string | null
-    case_retrieved?: boolean
-    confidence?: number | null
-    notes?: string | null
-    source_type?: 'fcl' | 'bailii' | 'web_search' | 'not_found'
-    verification_level?: 'primary' | 'secondary' | 'unverified'
-    matching_paragraphs?: MatchingParagraph[]
-  }[]
-}
-
-interface AuditReport {
-  audit_metadata: {
-    job_id: string
-    title: string
-    audited_at: string
-  }
-  claims: VerificationResult[]
-  summary: {
-    total_claims: number
-    total_citations: number
-  }
-}
-
-interface CommentaryResult {
-  case_name: string
+  caseName: string | null
   citation: string
-  url: string
-  excerpts: {
-    text: string
-    paragraph: string
-    lee_category: string
-    lee_category_name: string
-    keywords_matched: string[]
-  }[]
-}
-
-interface CommentaryReport {
-  search_metadata: {
-    searched_at: string
-    cases_searched: number
-    excerpts_found: number
+  proposition: string
+  status: 'pending' | 'resolving' | 'verifying' | 'done' | 'error'
+  result?: {
+    outcome: 'supported' | 'contradicted' | 'unclear' | 'unverifiable' | 'needs_review'
+    caseFound: boolean
+    sourceType?: string
+    url?: string
+    title?: string
+    confidence?: number
+    notes?: string
+    matchingParagraphs?: Array<{
+      para_num: string
+      text: string
+      similarity_score: number
+      match_type: 'keyword' | 'partial'
+    }>
   }
-  results: CommentaryResult[]
-  lee_category_counts: Record<string, number>
 }
 
 // Lee category definitions
 const LEE_CATEGORIES = {
-  '1': { name: 'Fabricated Case & Citation', color: '#f87171' },
-  '2': { name: 'Wrong Case Name, Right Citation', color: '#fb923c' },
-  '3': { name: 'Right Case Name, Wrong Citation', color: '#fbbf24' },
-  '4': { name: 'Conflated Authorities', color: '#a3e635' },
-  '5': { name: 'Correct Law, Invented Authority', color: '#4ade80' },
-  '6': { name: 'Real Case, Misstated Facts/Ratio', color: '#22d3d8' },
-  '7': { name: 'Misleading Secondary Paraphrase', color: '#60a5fa' },
-  '8': { name: 'False Citations Citing False', color: '#a78bfa' },
-  'general': { name: 'General AI/Hallucination Commentary', color: '#8b9bb4' }
+  '1': { name: 'Fabricated Case & Citation', description: 'Completely invented case that does not exist' },
+  '2': { name: 'Wrong Case Name, Right Citation', description: 'Citation exists but refers to a different case' },
+  '3': { name: 'Right Case Name, Wrong Citation', description: 'Case exists but citation is incorrect' },
+  '4': { name: 'Conflated Authorities', description: 'Two or more cases merged into one' },
+  '5': { name: 'Correct Law, Invented Authority', description: 'Legal principle is accurate but attributed to non-existent case' },
+  '6': { name: 'Real Case, Misstated Facts/Ratio', description: 'Case exists but facts or ratio decidendi are wrong' },
+  '7': { name: 'Misleading Secondary Paraphrase', description: 'Inaccurate summary from secondary sources' },
+  '8': { name: 'False Citations Citing False', description: 'Chain of fabricated citations' },
 }
 
-type TabType = 'audit' | 'commentary' | 'how-it-works'
+type AppView = 'upload' | 'audit'
 
 function App() {
-  const [activeTab, setActiveTab] = useState<TabType>('audit')
-  const [claims, setClaims] = useState<Claim[]>([
-    { id: '1', text: '', citations: [{ raw: '' }] }
-  ])
-  const [jobTitle, setJobTitle] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [isExtracting, setIsExtracting] = useState(false)
-  const [report, setReport] = useState<AuditReport | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<AppView>('upload')
+  const [showHowItWorks, setShowHowItWorks] = useState(false)
+
+  // Document state
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isExtracting, setIsExtracting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // Web search consent
+  // Extracted citations
+  const [extractedCitations, setExtractedCitations] = useState<ExtractedCitationItem[]>([])
+  const [documentTitle, setDocumentTitle] = useState('')
+
+  // Audit state
+  const [isAuditing, setIsAuditing] = useState(false)
+  const [auditProgress, setAuditProgress] = useState({ current: 0, total: 0, phase: '' })
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
-  
-  // Privacy mode is now ALWAYS on - documents are always parsed client-side
-  // Only citation strings are sent to the server for resolution
-  const privacyMode = true  // Always client-side processing
-  const [processingStatus, setProcessingStatus] = useState<string>('')
 
-  // Commentary state
-  const [commentaryCitations, setCommentaryCitations] = useState<string>('')
-  const [commentaryFile, setCommentaryFile] = useState<File | null>(null)
-  const [isSearchingCommentary, setIsSearchingCommentary] = useState(false)
-  const [commentaryReport, setCommentaryReport] = useState<CommentaryReport | null>(null)
-  const commentaryFileRef = useRef<HTMLInputElement>(null)
-  const [commentaryDragActive, setCommentaryDragActive] = useState(false)
+  // Selected citation for detail view
+  const [selectedCitation, setSelectedCitation] = useState<string | null>(null)
 
-  const addClaim = () => {
-    setClaims([
-      ...claims,
-      { id: String(Date.now()), text: '', citations: [{ raw: '' }] }
-    ])
-  }
-
-  const removeClaim = (index: number) => {
-    if (claims.length > 1) {
-      setClaims(claims.filter((_, i) => i !== index))
-    }
-  }
-
-  const updateClaimText = (index: number, text: string) => {
-    const newClaims = [...claims]
-    newClaims[index].text = text
-    setClaims(newClaims)
-  }
-
-  const updateCitation = (claimIndex: number, citationIndex: number, value: string) => {
-    const newClaims = [...claims]
-    newClaims[claimIndex].citations[citationIndex].raw = value
-    setClaims(newClaims)
-  }
-
-  const addCitation = (claimIndex: number) => {
-    const newClaims = [...claims]
-    newClaims[claimIndex].citations.push({ raw: '' })
-    setClaims(newClaims)
-  }
-
-  const removeCitation = (claimIndex: number, citationIndex: number) => {
-    const newClaims = [...claims]
-    if (newClaims[claimIndex].citations.length > 1) {
-      newClaims[claimIndex].citations = newClaims[claimIndex].citations.filter(
-        (_, i) => i !== citationIndex
-      )
-      setClaims(newClaims)
-    }
-  }
-
-  // File upload handlers
+  // File handlers
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -202,7 +98,6 @@ function App() {
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
-    
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0])
     }
@@ -215,1380 +110,677 @@ function App() {
   }
 
   const handleFile = (file: File) => {
-    const validTypes = ['text/plain', 'application/pdf', 'text/html', 'application/msword', 
+    const validTypes = ['text/plain', 'application/pdf', 'text/html', 'application/msword',
                         'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
-    
     if (!validTypes.includes(file.type) && !file.name.endsWith('.txt') && !file.name.endsWith('.pdf')) {
       setError('Please upload a PDF, TXT, HTML, or Word document')
       return
     }
-    
     setUploadedFile(file)
     setError(null)
   }
 
   const clearFile = () => {
     setUploadedFile(null)
+    setExtractedCitations([])
+    setView('upload')
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
   }
 
+  // Extract citations from document
   const extractFromDocument = async () => {
     if (!uploadedFile) return
 
     setIsExtracting(true)
     setError(null)
-    setProcessingStatus('')
 
     try {
-      if (privacyMode) {
-        // CLIENT-SIDE PROCESSING - Document never leaves browser
-        setProcessingStatus('Parsing document locally...')
-        
-        // Extract text from the file in the browser
-        const text = await extractTextFromFile(uploadedFile)
-        
-        if (!text || text.trim().length < 50) {
-          throw new Error('Could not extract text from document')
-        }
-        
-        setProcessingStatus('Extracting citations...')
-        
-        // Extract propositions with their citations
-        const propositions = extractPropositions(text)
-        
-        if (propositions.length > 0) {
-          const extractedClaims: Claim[] = propositions.map((prop, i) => ({
-            id: String(Date.now() + i),
-            text: prop.proposition,
-            citations: prop.citations.map(cit => ({ 
-              raw: formatCitation(cit)
-            }))
-          }))
-          
-          setClaims(extractedClaims)
-          setJobTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
-          setProcessingStatus(`Found ${extractedClaims.length} claims with citations`)
-        } else {
-          // Try to find just citations without propositions
-          const citations = extractCitations(text)
-          if (citations.length > 0) {
-            // Create claims from citations without specific propositions
-            const extractedClaims: Claim[] = citations.slice(0, 20).map((cit, i) => ({
-              id: String(Date.now() + i),
-              text: `Verify citation: ${formatCitation(cit)}`,
-              citations: [{ raw: formatCitation(cit) }]
-            }))
-            setClaims(extractedClaims)
-            setJobTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
-            setProcessingStatus(`Found ${citations.length} citations (no propositions extracted)`)
-          } else {
-            setError('No legal citations found in the document')
-          }
-        }
-      } else {
-        // SERVER-SIDE PROCESSING - Legacy mode
-        setProcessingStatus('Uploading to server...')
-        
-        const formData = new FormData()
-        formData.append('file', uploadedFile)
+      const text = await extractTextFromFile(uploadedFile)
 
-        const response = await fetch('http://localhost:8000/api/extract', {
-          method: 'POST',
-          body: formData
+      if (!text || text.trim().length < 50) {
+        throw new Error('Could not extract text from document')
+      }
+
+      const propositions = extractPropositions(text)
+
+      if (propositions.length > 0) {
+        const items: ExtractedCitationItem[] = []
+        propositions.forEach((prop, i) => {
+          prop.citations.forEach((cit, j) => {
+            items.push({
+              id: `${i}-${j}`,
+              caseName: cit.caseName || null,
+              citation: cit.raw,
+              proposition: prop.proposition,
+              status: 'pending'
+            })
+          })
         })
-
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.detail || 'Extraction failed')
-        }
-
-        const data = await response.json()
-        
-        if (data.claims && data.claims.length > 0) {
-          const extractedClaims: Claim[] = data.claims.map((c: any, i: number) => ({
-            id: String(Date.now() + i),
-            text: c.text,
-            citations: c.citations.map((cit: any) => ({ raw: cit.raw }))
+        setExtractedCitations(items)
+        setDocumentTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
+        setView('audit')
+      } else {
+        // Try just citations
+        const citations = extractCitations(text)
+        if (citations.length > 0) {
+          const items: ExtractedCitationItem[] = citations.slice(0, 30).map((cit, i) => ({
+            id: `cit-${i}`,
+            caseName: cit.caseName || null,
+            citation: cit.raw,
+            proposition: `Citation reference: ${formatCitation(cit)}`,
+            status: 'pending'
           }))
-          
-          setClaims(extractedClaims)
-          setJobTitle(data.suggested_title || uploadedFile.name.replace(/\.[^/.]+$/, ''))
+          setExtractedCitations(items)
+          setDocumentTitle(uploadedFile.name.replace(/\.[^/.]+$/, ''))
+          setView('audit')
         } else {
-          setError('No legal propositions with citations found in the document')
+          setError('No legal citations found in the document')
         }
       }
     } catch (err: any) {
       console.error('Extraction error:', err)
-      setError(err.message || 'Failed to extract claims from document')
+      setError(err.message || 'Failed to extract citations from document')
     } finally {
       setIsExtracting(false)
-      setProcessingStatus('')
     }
   }
 
+  // Run the audit
   const runAudit = async () => {
-    setIsLoading(true)
-    setError(null)
-    setReport(null)
-    setProcessingStatus('')
+    if (extractedCitations.length === 0) return
 
-    const validClaims = claims.filter(c => c.text.trim() && c.citations.some(cit => cit.raw.trim()))
-    
-    if (validClaims.length === 0) {
-      setError('Please add at least one claim with a citation')
-      setIsLoading(false)
-      return
-    }
+    setIsAuditing(true)
+    setError(null)
+
+    const total = extractedCitations.length
+    setAuditProgress({ current: 0, total, phase: 'Resolving citations...' })
+
+    // Reset all statuses
+    setExtractedCitations(prev => prev.map(c => ({ ...c, status: 'pending' as const, result: undefined })))
 
     try {
-      if (privacyMode) {
-        // CLIENT-SIDE AUDIT MODE
-        // Send citation strings WITH case names to server for resolution
-        // Verification happens locally in the browser
+      // Build citations with context for resolution
+      type CitationWithContext = { citation: string; case_name?: string | null; claim_text?: string | null }
+      const citationMap = new Map<string, CitationWithContext>()
 
-        // Import the type for citations with context
-        type CitationWithContext = { citation: string; case_name?: string | null; claim_text?: string | null }
-
-        // Collect all unique citations with their case names
-        const citationMap = new Map<string, CitationWithContext>()
-        validClaims.forEach(claim => {
-          claim.citations.forEach(cit => {
-            const citText = cit.raw.trim()
-            if (citText && !citationMap.has(citText.toLowerCase())) {
-              // Try to extract case name from the claim text
-              // Look for patterns like "Caparo v Dickman" before the citation
-              let caseName: string | null = null
-
-              // Pattern: "Case Name v Other" or "Case Name" followed by citation-like text
-              const caseNamePatterns = [
-                // Standard v pattern: captures "Party v Party" or "R v Party"
-                /([A-Z][A-Za-z'\-\.]+(?:\s+(?:Industries|Holdings|plc|Ltd|Co))*\s+v\.?\s+[A-Z][A-Za-z'\-\.]+(?:\s+(?:and\s+(?:Others?|Another|Ors))?)?)/i,
-                // R v pattern
-                /(R\s+v\.?\s+[A-Z][A-Za-z'\-\.]+)/i,
-                // Re/In re pattern
-                /((?:In\s+)?[Rr]e\s+[A-Z][A-Za-z'\-\.]+)/i,
-              ]
-
-              for (const pattern of caseNamePatterns) {
-                const match = claim.text.match(pattern)
-                if (match) {
-                  caseName = match[1].trim()
-                  break
-                }
+      extractedCitations.forEach(item => {
+        const key = item.citation.toLowerCase()
+        if (!citationMap.has(key)) {
+          // Extract case name from proposition if not already present
+          let caseName = item.caseName
+          if (!caseName) {
+            const caseNamePatterns = [
+              /([A-Z][A-Za-z'\-\.]+(?:\s+(?:Industries|Holdings|plc|Ltd|Co))*\s+v\.?\s+[A-Z][A-Za-z'\-\.]+(?:\s+(?:and\s+(?:Others?|Another|Ors))?)?)/i,
+              /(R\s+v\.?\s+[A-Z][A-Za-z'\-\.]+)/i,
+              /((?:In\s+)?[Rr]e\s+[A-Z][A-Za-z'\-\.]+)/i,
+            ]
+            for (const pattern of caseNamePatterns) {
+              const match = item.proposition.match(pattern)
+              if (match) {
+                caseName = match[1].trim()
+                break
               }
-
-              citationMap.set(citText.toLowerCase(), {
-                citation: citText,
-                case_name: caseName,
-                claim_text: claim.text.slice(0, 200) // Send first 200 chars for context
-              })
-            }
-          })
-        })
-
-        const citationsWithContext = Array.from(citationMap.values())
-        setProcessingStatus(`Resolving ${citationsWithContext.length} citation(s)...`)
-
-        // Send citations WITH case names to server for resolution
-        const resolveResponse = await resolveCitations(
-          citationsWithContext,
-          webSearchEnabled
-        )
-        
-        // Build a map of resolved citations
-        const resolvedMap = new Map<string, typeof resolveResponse.resolved[0]>()
-        resolveResponse.resolved.forEach(r => {
-          resolvedMap.set(r.citation.toLowerCase(), r)
-        })
-        
-        setProcessingStatus('Verifying claims locally...')
-        
-        // Now verify each claim locally
-        const auditResults: VerificationResult[] = []
-        
-        for (const claim of validClaims) {
-          const citationResults: VerificationResult['citations'] = []
-          
-          for (const citation of claim.citations) {
-            const citText = citation.raw.trim()
-            if (!citText) continue
-            
-            const resolved = resolvedMap.get(citText.toLowerCase())
-            
-            if (resolved && resolved.source_type !== 'not_found') {
-              // Case found - verify locally
-              const matches = findMatchingParagraphs(
-                claim.text,
-                resolved.paragraphs.map(p => ({
-                  para_num: p.para_num,
-                  text: p.text,
-                  speaker: p.speaker || undefined
-                }))
-              )
-              
-              const { score } = calculateConfidence(matches, true)
-              const outcome = determineOutcome(
-                true,
-                matches,
-                resolved.source_type as 'fcl' | 'bailii' | 'web_search' | 'not_found'
-              )
-              
-              citationResults.push({
-                citation_id: citText,
-                citation_text: citText,
-                case_name: resolved.case_name,
-                outcome,
-                source_type: resolved.source_type as 'fcl' | 'bailii' | 'web_search' | 'not_found',
-                verification_level: resolved.source_type === 'web_search' ? 'secondary' : 'primary',
-                authority_url: resolved.url,
-                authority_title: resolved.title,
-                case_retrieved: true,
-                confidence: Math.round(score * 100),
-                notes: matches.length > 0 
-                  ? `Found ${matches.length} matching paragraph(s)` 
-                  : 'No strong keyword matches found',
-                matching_paragraphs: matches.map(m => ({
-                  para_num: m.para_num,
-                  text: m.text.slice(0, 300) + (m.text.length > 300 ? '...' : ''),
-                  similarity_score: m.similarity_score,
-                  match_type: m.match_type
-                }))
-              })
-            } else {
-              // Case not found
-              citationResults.push({
-                citation_id: citText,
-                citation_text: citText,
-                case_name: resolved?.case_name || null,
-                outcome: 'unverifiable',
-                source_type: 'not_found',
-                verification_level: 'unverified',
-                case_retrieved: false,
-                confidence: 0,
-                notes: resolved?.error || 'Citation could not be resolved',
-                matching_paragraphs: []
-              })
             }
           }
-          
-          auditResults.push({
-            claim_id: claim.id,
-            text: claim.text,
-            citations: citationResults
+
+          citationMap.set(key, {
+            citation: item.citation,
+            case_name: caseName,
+            claim_text: item.proposition.slice(0, 200)
           })
         }
-        
-        // Build the report
-        const jobId = `client_${Date.now().toString(16)}`
-        const totalCitations = auditResults.reduce((sum, r) => sum + r.citations.length, 0)
-        
-        setReport({
-          audit_metadata: {
-            job_id: jobId,
-            title: jobTitle || 'Citation Audit (Privacy Mode)',
-            audited_at: new Date().toISOString()
-          },
-          claims: auditResults,
-          summary: {
-            total_claims: auditResults.length,
-            total_citations: totalCitations
-          }
-        })
-        
-        setProcessingStatus('')
-        
-      } else {
-        // LEGACY SERVER-SIDE MODE
-        setProcessingStatus('Processing on server...')
-
-        // Use runServerAudit from api.ts which handles API_BASE correctly
-        const { runServerAudit } = await import('./lib/api')
-        const data = await runServerAudit(
-          validClaims.map((c, i) => ({
-            claim_id: `claim_${i + 1}`,
-            text: c.text,
-            citations: c.citations.filter(cit => cit.raw.trim())
-          })),
-          jobTitle || 'Citation Audit',
-          webSearchEnabled
-        )
-
-        setReport(data)
-      }
-    } catch (err) {
-      console.error('Audit error:', err)
-      setError('Failed to run audit. Make sure the backend is running.')
-    } finally {
-      setIsLoading(false)
-      setProcessingStatus('')
-    }
-  }
-
-  // Commentary functions
-  const handleCommentaryFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setCommentaryFile(e.target.files[0])
-      setError(null)
-    }
-  }
-
-  const handleCommentaryFileDirect = (file: File) => {
-    setCommentaryFile(file)
-    setError(null)
-  }
-
-  const handleCommentaryDrag = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setCommentaryDragActive(true)
-    } else if (e.type === 'dragleave') {
-      setCommentaryDragActive(false)
-    }
-  }
-
-  const handleCommentaryDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setCommentaryDragActive(false)
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleCommentaryFileDirect(e.dataTransfer.files[0])
-    }
-  }
-
-  const clearCommentaryFile = () => {
-    setCommentaryFile(null)
-    if (commentaryFileRef.current) {
-      commentaryFileRef.current.value = ''
-    }
-  }
-
-  const searchCommentary = async () => {
-    setIsSearchingCommentary(true)
-    setError(null)
-    setCommentaryReport(null)
-
-    try {
-      const formData = new FormData()
-      
-      if (commentaryFile) {
-        formData.append('file', commentaryFile)
-      }
-      
-      if (commentaryCitations.trim()) {
-        formData.append('citations', commentaryCitations.trim())
-      }
-
-      if (!commentaryFile && !commentaryCitations.trim()) {
-        setError('Please provide case citations or upload a document')
-        setIsSearchingCommentary(false)
-        return
-      }
-
-      const response = await fetch('http://localhost:8000/api/commentary', {
-        method: 'POST',
-        body: formData
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Search failed')
+      const citationsWithContext = Array.from(citationMap.values())
+
+      // Mark all as resolving
+      setExtractedCitations(prev => prev.map(c => ({ ...c, status: 'resolving' as const })))
+
+      // Resolve citations
+      const resolveResponse = await resolveCitations(citationsWithContext, webSearchEnabled)
+
+      // Build resolved map
+      const resolvedMap = new Map<string, typeof resolveResponse.resolved[0]>()
+      resolveResponse.resolved.forEach(r => {
+        resolvedMap.set(r.citation.toLowerCase(), r)
+      })
+
+      setAuditProgress({ current: 0, total, phase: 'Verifying claims...' })
+
+      // Now verify each citation
+      const updatedCitations = [...extractedCitations]
+
+      for (let i = 0; i < updatedCitations.length; i++) {
+        const item = updatedCitations[i]
+
+        // Update status to verifying
+        updatedCitations[i] = { ...item, status: 'verifying' }
+        setExtractedCitations([...updatedCitations])
+        setAuditProgress({ current: i + 1, total, phase: `Verifying ${i + 1} of ${total}...` })
+
+        const resolved = resolvedMap.get(item.citation.toLowerCase())
+
+        if (resolved && resolved.source_type !== 'not_found') {
+          // Case found - verify
+          const matches = findMatchingParagraphs(
+            item.proposition,
+            resolved.paragraphs.map(p => ({
+              para_num: p.para_num,
+              text: p.text,
+              speaker: p.speaker || undefined
+            }))
+          )
+
+          const { score } = calculateConfidence(matches, true)
+          const outcome = determineOutcome(
+            true,
+            matches,
+            resolved.source_type as 'fcl' | 'bailii' | 'web_search' | 'not_found'
+          )
+
+          updatedCitations[i] = {
+            ...item,
+            caseName: resolved.case_name || item.caseName,
+            status: 'done',
+            result: {
+              outcome,
+              caseFound: true,
+              sourceType: resolved.source_type,
+              url: resolved.url || undefined,
+              title: resolved.title || undefined,
+              confidence: Math.round(score * 100),
+              notes: matches.length > 0
+                ? `Found ${matches.length} matching paragraph(s)`
+                : 'No strong keyword matches found',
+              matchingParagraphs: matches.map(m => ({
+                para_num: m.para_num,
+                text: m.text.slice(0, 400) + (m.text.length > 400 ? '...' : ''),
+                similarity_score: m.similarity_score,
+                match_type: m.match_type
+              }))
+            }
+          }
+        } else {
+          // Case not found
+          updatedCitations[i] = {
+            ...item,
+            status: 'done',
+            result: {
+              outcome: 'unverifiable',
+              caseFound: false,
+              notes: resolved?.error || 'Citation could not be found on BAILII or Find Case Law'
+            }
+          }
+        }
+
+        setExtractedCitations([...updatedCitations])
+
+        // Small delay for visual feedback
+        await new Promise(r => setTimeout(r, 100))
       }
 
-      const data = await response.json()
-      setCommentaryReport(data)
-    } catch (err: any) {
-      setError(err.message || 'Failed to search for commentary')
+      setAuditProgress({ current: total, total, phase: 'Complete' })
+
+    } catch (err) {
+      console.error('Audit error:', err)
+      setError('Failed to run audit. Please try again.')
     } finally {
-      setIsSearchingCommentary(false)
+      setIsAuditing(false)
     }
   }
 
-  const getOutcomeIcon = (outcome: string, _caseRetrieved?: boolean) => {
-    switch (outcome) {
-      case 'supported':
-        return <CheckCircle2 className="outcome-icon supported" />
-      case 'contradicted':
-        return <XCircle className="outcome-icon contradicted" />
-      case 'needs_review':
-        return <AlertCircle className="outcome-icon needs-review" />
-      case 'unverifiable':
-        return <XCircle className="outcome-icon unverifiable" />
-      default:
-        return <AlertCircle className="outcome-icon unclear" />
-    }
+  // Get status counts
+  const getStatusCounts = () => {
+    const counts = { verified: 0, needsReview: 0, notFound: 0, pending: 0 }
+    extractedCitations.forEach(c => {
+      if (c.status !== 'done') counts.pending++
+      else if (c.result?.outcome === 'supported') counts.verified++
+      else if (c.result?.caseFound === false) counts.notFound++
+      else counts.needsReview++
+    })
+    return counts
   }
 
-  const getOutcomeLabel = (outcome: string, caseRetrieved?: boolean) => {
-    switch (outcome) {
-      case 'supported':
-        return 'Verified ✓'
-      case 'contradicted':
-        return 'Possible Error'
-      case 'needs_review':
-        return caseRetrieved ? 'Case Found - Review Needed' : 'Review Needed'
-      case 'unclear':
-        return 'Unclear'
-      case 'unverifiable':
-        return caseRetrieved ? 'Could Not Verify' : 'Case Not Found'
-      default:
-        return 'Unknown'
+  const selectedItem = extractedCitations.find(c => c.id === selectedCitation)
+
+  // Auto-select first citation with result when audit completes
+  useEffect(() => {
+    if (!isAuditing && extractedCitations.some(c => c.status === 'done') && !selectedCitation) {
+      const firstDone = extractedCitations.find(c => c.status === 'done')
+      if (firstDone) setSelectedCitation(firstDone.id)
     }
-  }
+  }, [isAuditing, extractedCitations, selectedCitation])
 
   return (
     <div className="app">
       <div className="grain-overlay" />
-      
-      {/* Header */}
-      <header className="header">
-        <motion.div 
-          className="logo-container"
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-        >
-          <div className="logo-icon">
-            <Scale size={28} />
-          </div>
-          <div className="logo-text">
-            <h1>Matthew Lee Bot</h1>
-            <span className="tagline">Legal Citation Auditor</span>
-          </div>
-        </motion.div>
 
-        {/* Tab Navigation */}
-        <nav className="tab-nav">
-          <button 
-            className={`tab-btn ${activeTab === 'audit' ? 'active' : ''}`}
-            onClick={() => setActiveTab('audit')}
+      {/* Header */}
+      <header className="header-compact">
+        <div className="header-content">
+          <div className="logo-container" onClick={() => { setView('upload'); setExtractedCitations([]); setSelectedCitation(null); }}>
+            <div className="logo-icon">
+              <Scale size={24} />
+            </div>
+            <div className="logo-text">
+              <h1>Citation Auditor</h1>
+            </div>
+          </div>
+
+          <button
+            className="how-it-works-btn"
+            onClick={() => setShowHowItWorks(true)}
           >
-            <FileSearch size={18} />
-            Citation Audit
-          </button>
-          <button 
-            className={`tab-btn ${activeTab === 'commentary' ? 'active' : ''}`}
-            onClick={() => setActiveTab('commentary')}
-          >
-            <Gavel size={18} />
-            Judicial Commentary
-          </button>
-          <button 
-            className={`tab-btn info-btn ${activeTab === 'how-it-works' ? 'active' : ''}`}
-            onClick={() => setActiveTab('how-it-works')}
-          >
-            <AlertCircle size={18} />
+            <Info size={16} />
             How It Works
           </button>
-        </nav>
+        </div>
       </header>
 
-      <main className="main-content">
-        {/* ===== AUDIT TAB ===== */}
-        {activeTab === 'audit' && (
-          <>
-            {/* Deployment Options Banner */}
-            <motion.section 
-              className="deployment-options-banner"
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
+      {/* How It Works Modal */}
+      <AnimatePresence>
+        {showHowItWorks && (
+          <motion.div
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowHowItWorks(false)}
+          >
+            <motion.div
+              className="modal-content how-it-works-modal"
+              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.95 }}
+              onClick={e => e.stopPropagation()}
             >
-              <h2>How It Works</h2>
-              <div className="how-it-works-summary">
-                <div className="step-item">
-                  <span className="step-num">1</span>
-                  <div className="step-content">
-                    <strong>Document Parsing</strong>
-                    <p>Your document is parsed <em>in your browser</em>. The file never leaves your device.</p>
+              <button className="modal-close" onClick={() => setShowHowItWorks(false)}>
+                <X size={20} />
+              </button>
+
+              <h2>How Citation Auditor Works</h2>
+
+              <div className="modal-section">
+                <h3>What This Tool Checks</h3>
+                <p>
+                  This tool checks for <strong>Type 1 hallucinations</strong> from Matthew Lee's taxonomy:
+                  <em>fabricated cases and citations</em> that do not exist. It verifies whether cited cases
+                  can be found on official legal databases.
+                </p>
+
+                <div className="lee-taxonomy">
+                  <h4>Matthew Lee's 8 Types of Legal AI Hallucinations</h4>
+                  <div className="taxonomy-grid">
+                    {Object.entries(LEE_CATEGORIES).map(([num, cat]) => (
+                      <div key={num} className={`taxonomy-item ${num === '1' ? 'active' : ''}`}>
+                        <span className="taxonomy-num">{num}</span>
+                        <div className="taxonomy-info">
+                          <strong>{cat.name}</strong>
+                          <span>{cat.description}</span>
+                        </div>
+                        {num === '1' && <span className="check-badge">Checked</span>}
+                      </div>
+                    ))}
                   </div>
-                </div>
-                <div className="step-item">
-                  <span className="step-num">2</span>
-                  <div className="step-content">
-                    <strong>Citation Resolution</strong>
-                    <p>Only citation strings (e.g., "[2019] UKSC 12") are sent to our server to find the cases on BAILII.</p>
-                  </div>
-                </div>
-                <div className="step-item">
-                  <span className="step-num">3</span>
-                  <div className="step-content">
-                    <strong>Verification</strong>
-                    <p>Case text is fetched and compared against your claims <em>in your browser</em>.</p>
-                  </div>
+                  <p className="taxonomy-note">
+                    We are actively working on methods to detect Types 2-8. Currently, only Type 1
+                    (completely fabricated cases) can be reliably detected through database lookup.
+                  </p>
                 </div>
               </div>
-              <p className="privacy-note">
-                <ShieldCheck size={16} /> <strong>Privacy:</strong> Your document content never leaves your browser. Only citation strings are processed by our server.
-              </p>
-            </motion.section>
 
-            {/* Document Upload Section */}
-            <motion.section 
-              className="upload-section"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.1 }}
-            >
-              <div className="section-header">
-                <Upload size={20} />
-                <h2>Upload Document</h2>
-              </div>
-              
-              <p className="section-description">
-                Upload a legal document and we'll automatically extract propositions and their supporting citations.
-              </p>
-
-              <input
-                ref={fileInputRef}
-                id="audit-file-input"
-                type="file"
-                accept=".pdf,.txt,.html,.doc,.docx"
-                onChange={handleFileInput}
-                style={{ display: 'none' }}
-              />
-              
-              {uploadedFile ? (
-                <div className="upload-zone has-file">
-                  <div className="uploaded-file">
-                    <FileText size={24} />
-                    <div className="file-info">
-                      <span className="file-name">{uploadedFile.name}</span>
-                      <span className="file-size">{(uploadedFile.size / 1024).toFixed(1)} KB</span>
+              <div className="modal-section">
+                <h3>The Process</h3>
+                <div className="process-steps">
+                  <div className="process-step">
+                    <span className="step-number">1</span>
+                    <div>
+                      <strong>Document Parsing</strong>
+                      <p>Your document is parsed entirely in your browser. The file never leaves your device.</p>
                     </div>
-                    <button className="btn-icon small" onClick={() => clearFile()}>
-                      <X size={16} />
-                    </button>
+                  </div>
+                  <div className="process-step">
+                    <span className="step-number">2</span>
+                    <div>
+                      <strong>Citation Extraction</strong>
+                      <p>Legal citations and associated propositions are extracted using pattern matching.</p>
+                    </div>
+                  </div>
+                  <div className="process-step">
+                    <span className="step-number">3</span>
+                    <div>
+                      <strong>Case Resolution</strong>
+                      <p>Citation strings are sent to our server to find cases on Find Case Law and BAILII.</p>
+                    </div>
+                  </div>
+                  <div className="process-step">
+                    <span className="step-number">4</span>
+                    <div>
+                      <strong>Verification</strong>
+                      <p>Case text is compared against your claims using keyword matching in your browser.</p>
+                    </div>
                   </div>
                 </div>
-              ) : (
-                <div 
-                  className={`upload-zone ${dragActive ? 'drag-active' : ''}`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  <div className="upload-prompt">
-                    <Upload size={32} />
-                    <span>Drag and drop your document here</span>
-                    <span className="file-types">PDF, TXT, HTML, Word</span>
-                    <button 
-                      type="button"
-                      className="btn-secondary browse-btn"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <FileSearch size={18} />
-                      Browse Files
-                    </button>
-                  </div>
-                </div>
-              )}
+              </div>
 
-              {uploadedFile && (
-                <button 
-                  className="btn-primary extract-btn"
-                  onClick={extractFromDocument}
-                  disabled={isExtracting}
-                >
-                  {isExtracting ? (
-                    <>
-                      <Loader2 size={18} className="spinning" /> Extracting...
-                    </>
-                  ) : (
-                    <>
-                      <FileSearch size={18} /> Extract Claims
-                    </>
-                  )}
-                </button>
-              )}
-            </motion.section>
+              <div className="modal-section privacy-section">
+                <h3>Privacy</h3>
+                <p>
+                  <strong>Your document content never leaves your browser.</strong> Only citation strings
+                  (e.g., "[2019] UKSC 12") and case names are sent to our server for resolution.
+                  We do not store any data.
+                </p>
+              </div>
 
-            {/* Divider */}
-            <div className="section-divider">
-              <span>or enter claims manually</span>
+              <div className="modal-section disclaimer-section">
+                <h3>Important Disclaimer</h3>
+                <p>
+                  This is an experimental tool for research purposes. It provides <em>indications</em>,
+                  not definitive answers. Always verify citations manually before relying on them in
+                  any legal context. This tool should not be used as a substitute for proper legal research.
+                </p>
+              </div>
+
+              <div className="modal-credits">
+                <p>
+                  Inspired by <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">Matthew Lee's research</a> on AI hallucinations in legal practice.
+                </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <main className="main-container">
+        {/* Upload View */}
+        {view === 'upload' && (
+          <motion.div
+            className="upload-view"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="upload-hero">
+              <h2>Check Your Citations</h2>
+              <p>Upload a legal document to verify that cited cases exist and can be found on official databases.</p>
             </div>
 
-            {/* Input Section */}
-            <motion.section 
-              className="input-section"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.txt,.html,.doc,.docx"
+              onChange={handleFileInput}
+              style={{ display: 'none' }}
+            />
+
+            <div
+              className={`upload-zone-large ${dragActive ? 'drag-active' : ''} ${uploadedFile ? 'has-file' : ''}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+              onClick={() => !uploadedFile && fileInputRef.current?.click()}
             >
-              <div className="section-header">
-                <FileSearch size={20} />
-                <h2>Claims to Audit</h2>
-              </div>
+              {uploadedFile ? (
+                <div className="uploaded-file-display">
+                  <FileText size={40} />
+                  <div className="file-details">
+                    <span className="file-name">{uploadedFile.name}</span>
+                    <span className="file-size">{(uploadedFile.size / 1024).toFixed(1)} KB</span>
+                  </div>
+                  <button className="remove-file-btn" onClick={(e) => { e.stopPropagation(); clearFile(); }}>
+                    <X size={18} />
+                  </button>
+                </div>
+              ) : (
+                <div className="upload-prompt-large">
+                  <Upload size={48} />
+                  <span className="upload-text">Drop your document here or click to browse</span>
+                  <span className="file-types">PDF, Word, TXT, HTML</span>
+                </div>
+              )}
+            </div>
 
-              <div className="job-title-input">
-                <label htmlFor="jobTitle">Audit Title (optional)</label>
-                <input
-                  id="jobTitle"
-                  type="text"
-                  placeholder="e.g., Contract Review Citations"
-                  value={jobTitle}
-                  onChange={(e) => setJobTitle(e.target.value)}
-                />
-              </div>
-
-              <div className="claims-container">
-                <AnimatePresence>
-                  {claims.map((claim, claimIndex) => (
-                    <motion.div
-                      key={claim.id}
-                      className="claim-card"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <div className="claim-header">
-                        <span className="claim-number">Claim {claimIndex + 1}</span>
-                        {claims.length > 1 && (
-                          <button 
-                            className="btn-icon danger"
-                            onClick={() => removeClaim(claimIndex)}
-                            title="Remove claim"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="claim-body">
-                        <div className="input-group">
-                          <label>Legal Proposition</label>
-                          <textarea
-                            placeholder="e.g., The court held that informed consent is required before medical procedures"
-                            value={claim.text}
-                            onChange={(e) => updateClaimText(claimIndex, e.target.value)}
-                            rows={3}
-                          />
-                        </div>
-
-                        <div className="citations-section">
-                          <label>Citations</label>
-                          {claim.citations.map((citation, citIndex) => (
-                            <div key={citIndex} className="citation-row">
-                              <input
-                                type="text"
-                                placeholder="e.g., Montgomery v Lanarkshire [2015] UKSC 11"
-                                value={citation.raw}
-                                onChange={(e) => updateCitation(claimIndex, citIndex, e.target.value)}
-                              />
-                              {claim.citations.length > 1 && (
-                                <button 
-                                  className="btn-icon small danger"
-                                  onClick={() => removeCitation(claimIndex, citIndex)}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                          <button 
-                            className="btn-text"
-                            onClick={() => addCitation(claimIndex)}
-                          >
-                            <Plus size={14} /> Add citation
-                          </button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-
-              {/* Web Search Consent */}
-              <div className="search-settings">
-                <label className="consent-toggle">
-                  <input 
-                    type="checkbox" 
-                    checked={webSearchEnabled}
-                    onChange={(e) => setWebSearchEnabled(e.target.checked)}
-                  />
-                  <span className="toggle-switch"></span>
-                  <span className="toggle-label">Enable web search fallback</span>
-                </label>
-                <p className="consent-description">
-                  If a case isn't found on National Archives or BAILII, search the web for verification. 
-                  Results will be marked as "Secondary Source".
-                </p>
-                {webSearchEnabled && (
-                  <p className="consent-warning">
-                    <AlertCircle size={14} />
-                    Web searches are sent to external search engines. Citation text will be shared.
-                  </p>
+            {uploadedFile && (
+              <button
+                className="extract-btn-large"
+                onClick={extractFromDocument}
+                disabled={isExtracting}
+              >
+                {isExtracting ? (
+                  <>
+                    <Loader2 size={20} className="spinning" />
+                    Extracting Citations...
+                  </>
+                ) : (
+                  <>
+                    <FileSearch size={20} />
+                    Extract Citations
+                  </>
                 )}
+              </button>
+            )}
+
+            {error && (
+              <div className="error-message">
+                <AlertCircle size={18} />
+                {error}
               </div>
-              
-              {/* Processing status */}
-              {processingStatus && (
-                <div className="processing-status">
-                  <Loader2 size={16} className="spinning" />
-                  <span>{processingStatus}</span>
-                </div>
-              )}
+            )}
 
-              <div className="actions-row">
-                <button className="btn-secondary" onClick={addClaim}>
-                  <Plus size={18} /> Add Another Claim
-                </button>
-                <button 
-                  className="btn-primary" 
-                  onClick={runAudit}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 size={18} className="spinning" /> Auditing...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={18} /> Run Audit
-                    </>
-                  )}
-                </button>
+            <div className="upload-info">
+              <div className="info-item">
+                <CheckCircle2 size={16} />
+                <span>Detects Type 1 hallucinations (fabricated cases)</span>
               </div>
-
-              {error && (
-                <motion.div 
-                  className="error-banner"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                >
-                  <AlertCircle size={18} />
-                  {error}
-                </motion.div>
-              )}
-            </motion.section>
-
-            {/* Results Section */}
-            <AnimatePresence>
-              {report && (
-                <motion.section 
-                  className="results-section"
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.5 }}
-                >
-                  <div className="section-header">
-                    <BookOpen size={20} />
-                    <h2>Audit Results</h2>
-                  </div>
-
-                  <div className="results-summary">
-                    <div className="summary-stat">
-                      <span className="stat-value">{report.summary.total_claims}</span>
-                      <span className="stat-label">Claims Checked</span>
-                    </div>
-                    <div className="summary-stat">
-                      <span className="stat-value">
-                        {report.claims.reduce((acc, c) => 
-                          acc + c.citations.filter(cit => cit.case_retrieved).length, 0
-                        )}
-                      </span>
-                      <span className="stat-label">Cases Retrieved</span>
-                    </div>
-                    <div className="summary-stat">
-                      <span className="stat-value supported">
-                        {report.claims.reduce((acc, c) => 
-                          acc + c.citations.filter(cit => cit.outcome === 'supported').length, 0
-                        )}
-                      </span>
-                      <span className="stat-label">Verified</span>
-                    </div>
-                    <div className="summary-stat">
-                      <span className="stat-value" style={{ color: '#60a5fa' }}>
-                        {report.claims.reduce((acc, c) => 
-                          acc + c.citations.filter(cit => cit.outcome === 'needs_review').length, 0
-                        )}
-                      </span>
-                      <span className="stat-label">Needs Review</span>
-                    </div>
-                    <div className="summary-stat">
-                      <span className="stat-value warning">
-                        {report.claims.reduce((acc, c) => 
-                          acc + c.citations.filter(cit => !cit.case_retrieved && cit.hallucination_type === '1').length, 0
-                        )}
-                      </span>
-                      <span className="stat-label">Not Found</span>
-                    </div>
-                  </div>
-
-                  <div className="results-list">
-                    {report.claims.map((claim, index) => (
-                      <motion.div 
-                        key={claim.claim_id}
-                        className="result-card"
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                      >
-                        <div className="result-claim">
-                          <span className="result-label">Claim</span>
-                          <p>{claim.text}</p>
-                        </div>
-                        <div className="result-citations">
-                          {claim.citations.map((cit) => (
-                            <div key={cit.citation_id} className={`citation-result ${cit.outcome}`}>
-                              {getOutcomeIcon(cit.outcome, cit.case_retrieved)}
-                              <div className="citation-info">
-                                <div className="citation-header">
-                                  {cit.case_name ? (
-                                    <span className="case-name-main">{cit.case_name}</span>
-                                  ) : (
-                                    <span className="citation-text">{cit.citation_text}</span>
-                                  )}
-                                  {cit.case_retrieved && (
-                                    <span className={`source-badge ${cit.source_type || 'primary'}`}>
-                                      {cit.source_type === 'web_search' 
-                                        ? '⚠️ Secondary Source' 
-                                        : cit.source_type === 'fcl' 
-                                          ? '✓ Find Case Law'
-                                          : cit.source_type === 'bailii'
-                                            ? '✓ BAILII'
-                                            : '✓ Case Retrieved'}
-                                    </span>
-                                  )}
-                                </div>
-                                {cit.case_name && (
-                                  <div className="citation-ref">
-                                    <span className="citation-text-secondary">{cit.citation_text}</span>
-                                  </div>
-                                )}
-                                {cit.authority_title && cit.authority_title !== 'Unknown Case' && cit.authority_title !== cit.case_name && (
-                                  <div className="authority-info">
-                                    <span className="authority-title">{cit.authority_title}</span>
-                                    {cit.authority_url && (
-                                      <a 
-                                        href={cit.authority_url} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="source-link"
-                                      >
-                                        View Source →
-                                      </a>
-                                    )}
-                                  </div>
-                                )}
-                                {cit.notes && (
-                                  <div className="citation-notes">{cit.notes}</div>
-                                )}
-                                
-                                {/* Matching Paragraphs Section */}
-                                {cit.matching_paragraphs && cit.matching_paragraphs.length > 0 && (
-                                  <div className="matching-paragraphs">
-                                    <div className="matching-header">
-                                      <BookOpen size={14} />
-                                      <span>Matching Paragraphs in Judgment</span>
-                                    </div>
-                                    {cit.matching_paragraphs.map((para, idx) => (
-                                      <div key={idx} className={`matching-para ${para.match_type}`}>
-                                        <div className="para-header">
-                                          <span className="para-num">
-                                            {para.para_num ? `[${para.para_num}]` : `Para ${idx + 1}`}
-                                          </span>
-                                          <span className={`match-score ${para.match_type}`}>
-                                            {Math.round(para.similarity_score * 100)}% match
-                                          </span>
-                                          {cit.authority_url && para.para_num && (
-                                            <a 
-                                              href={`${cit.authority_url}#para${para.para_num}`}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="para-link"
-                                              title="Jump to paragraph in judgment"
-                                            >
-                                              Go to ¶{para.para_num} →
-                                            </a>
-                                          )}
-                                        </div>
-                                        <p className="para-text">{para.text}</p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                
-                                <div className="citation-badges">
-                                  <span className={`outcome-badge ${cit.outcome}`}>
-                                    {getOutcomeLabel(cit.outcome, cit.case_retrieved)}
-                                  </span>
-                                  {cit.confidence !== null && cit.confidence !== undefined && (
-                                    <span className="confidence-badge">
-                                      {cit.confidence}% match
-                                    </span>
-                                  )}
-                                  {cit.hallucination_type && cit.hallucination_type !== 'review' && cit.outcome !== 'supported' && (
-                                    <span 
-                                      className="hallucination-badge"
-                                      style={{ 
-                                        background: LEE_CATEGORIES[cit.hallucination_type as keyof typeof LEE_CATEGORIES]?.color + '33',
-                                        color: LEE_CATEGORIES[cit.hallucination_type as keyof typeof LEE_CATEGORIES]?.color
-                                      }}
-                                    >
-                                      Type {cit.hallucination_type}: {cit.hallucination_type_name}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                    </motion.div>
-                  ))}
-                </div>
-
-                  <div className="audit-meta">
-                    <span>Audited: {new Date(report.audit_metadata.audited_at).toLocaleString()}</span>
-                    <span>Job ID: {report.audit_metadata.job_id}</span>
-                  </div>
-                </motion.section>
-              )}
-            </AnimatePresence>
-          </>
+              <div className="info-item">
+                <CheckCircle2 size={16} />
+                <span>Document parsed locally - never uploaded</span>
+              </div>
+              <div className="info-item">
+                <CheckCircle2 size={16} />
+                <span>Checks against BAILII & Find Case Law</span>
+              </div>
+            </div>
+          </motion.div>
         )}
 
-        {/* ===== COMMENTARY TAB ===== */}
-        {activeTab === 'commentary' && (
-          <>
-            <motion.section 
-              className="input-section commentary-section"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-            >
-              <div className="section-header">
-                <MessageSquareQuote size={20} />
-                <h2>Find Judicial Commentary on AI Hallucinations</h2>
+        {/* Audit View */}
+        {view === 'audit' && (
+          <div className="audit-view">
+            {/* Left Panel - Citation List */}
+            <div className="citations-panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <FileText size={18} />
+                  <span>{documentTitle}</span>
+                </div>
+                <button className="back-btn" onClick={clearFile}>
+                  <X size={16} />
+                </button>
               </div>
-              
-              <p className="section-description">
-                Search cases for judicial commentary on AI hallucinations. Enter case citations or upload case documents, 
-                and we'll extract relevant excerpts and map them to the <strong>Lee Categories</strong>.
-              </p>
 
-              {/* Lee Categories Reference */}
-              <div className="lee-categories-grid">
-                {Object.entries(LEE_CATEGORIES).map(([key, cat]) => (
-                  <div key={key} className="lee-category-chip" style={{ borderColor: cat.color }}>
-                    <span className="lee-num" style={{ background: cat.color }}>{key === 'general' ? '•' : key}</span>
-                    <span className="lee-name">{cat.name}</span>
+              {/* Status Summary */}
+              <div className="status-summary">
+                {(() => {
+                  const counts = getStatusCounts()
+                  return (
+                    <>
+                      <div className="status-item verified">
+                        <span className="count">{counts.verified}</span>
+                        <span className="label">Verified</span>
+                      </div>
+                      <div className="status-item review">
+                        <span className="count">{counts.needsReview}</span>
+                        <span className="label">Review</span>
+                      </div>
+                      <div className="status-item not-found">
+                        <span className="count">{counts.notFound}</span>
+                        <span className="label">Not Found</span>
+                      </div>
+                    </>
+                  )
+                })()}
+              </div>
+
+              {/* Progress Bar */}
+              {isAuditing && (
+                <div className="audit-progress">
+                  <div className="progress-bar">
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${(auditProgress.current / auditProgress.total) * 100}%` }}
+                    />
+                  </div>
+                  <span className="progress-text">{auditProgress.phase}</span>
+                </div>
+              )}
+
+              {/* Citation List */}
+              <div className="citation-list">
+                {extractedCitations.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`citation-item ${item.status} ${selectedCitation === item.id ? 'selected' : ''} ${item.result?.outcome || ''}`}
+                    onClick={() => setSelectedCitation(item.id)}
+                  >
+                    <div className="citation-status-icon">
+                      {item.status === 'pending' && <div className="status-dot pending" />}
+                      {item.status === 'resolving' && <Loader2 size={14} className="spinning" />}
+                      {item.status === 'verifying' && <Loader2 size={14} className="spinning" />}
+                      {item.status === 'done' && item.result?.outcome === 'supported' && <CheckCircle2 size={14} className="icon-verified" />}
+                      {item.status === 'done' && item.result?.caseFound === false && <XCircle size={14} className="icon-not-found" />}
+                      {item.status === 'done' && item.result?.caseFound && item.result?.outcome !== 'supported' && <AlertCircle size={14} className="icon-review" />}
+                    </div>
+                    <div className="citation-item-content">
+                      <span className="citation-case-name">{item.caseName || 'Unknown Case'}</span>
+                      <span className="citation-ref">{item.citation}</span>
+                    </div>
+                    <ChevronRight size={14} className="chevron" />
                   </div>
                 ))}
               </div>
 
-              <div className="commentary-inputs">
-                <div className="input-group">
-                  <label>Case Citations (one per line)</label>
-                  <textarea
-                    placeholder={"[2023] EWHC 123 (KB)\nMata v Avianca [2023]\nR (oao) v Secretary of State [2024] EWHC 456"}
-                    value={commentaryCitations}
-                    onChange={(e) => setCommentaryCitations(e.target.value)}
-                    rows={4}
-                  />
+              {/* Run Audit Button */}
+              {!isAuditing && extractedCitations.some(c => c.status === 'pending') && (
+                <div className="audit-controls">
+                  <label className="web-search-toggle">
+                    <input
+                      type="checkbox"
+                      checked={webSearchEnabled}
+                      onChange={(e) => setWebSearchEnabled(e.target.checked)}
+                    />
+                    <span>Enable web search fallback</span>
+                  </label>
+                  <button className="run-audit-btn" onClick={runAudit}>
+                    <FileSearch size={18} />
+                    Run Audit
+                  </button>
                 </div>
-
-                <div className="section-divider small">
-                  <span>or upload case documents</span>
-                </div>
-
-                <input
-                  ref={commentaryFileRef}
-                  id="commentary-file-input"
-                  type="file"
-                  accept=".pdf,.txt,.html,.xml,.doc,.docx"
-                  onChange={handleCommentaryFile}
-                  style={{ display: 'none' }}
-                />
-                
-                {commentaryFile ? (
-                  <div className="upload-zone has-file">
-                    <div className="uploaded-file">
-                      <FileText size={24} />
-                      <div className="file-info">
-                        <span className="file-name">{commentaryFile.name}</span>
-                        <span className="file-size">{(commentaryFile.size / 1024).toFixed(1)} KB</span>
-                      </div>
-                      <button className="btn-icon small" onClick={() => clearCommentaryFile()}>
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div 
-                    className={`upload-zone ${commentaryDragActive ? 'drag-active' : ''}`}
-                    onDragEnter={handleCommentaryDrag}
-                    onDragLeave={handleCommentaryDrag}
-                    onDragOver={handleCommentaryDrag}
-                    onDrop={handleCommentaryDrop}
-                  >
-                    <div className="upload-prompt">
-                      <Upload size={32} />
-                      <span>Drag and drop case document here</span>
-                      <span className="file-types">PDF, TXT, HTML, XML, Word</span>
-                      <button 
-                        type="button"
-                        className="btn-secondary browse-btn"
-                        onClick={() => commentaryFileRef.current?.click()}
-                      >
-                        <FileSearch size={18} />
-                        Browse Files
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <button 
-                className="btn-primary"
-                onClick={searchCommentary}
-                disabled={isSearchingCommentary}
-              >
-                {isSearchingCommentary ? (
-                  <>
-                    <Loader2 size={18} className="spinning" /> Searching...
-                  </>
-                ) : (
-                  <>
-                    <Search size={18} /> Find Commentary
-                  </>
-                )}
-              </button>
-
-              {error && activeTab === 'commentary' && (
-                <motion.div 
-                  className="error-banner"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                >
-                  <AlertCircle size={18} />
-                  {error}
-                </motion.div>
               )}
-            </motion.section>
+            </div>
 
-            {/* Commentary Results */}
-            <AnimatePresence>
-              {commentaryReport && (
-                <motion.section 
-                  className="results-section commentary-results"
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.5 }}
-                >
-                  <div className="section-header">
-                    <Gavel size={20} />
-                    <h2>Judicial Commentary Found</h2>
+            {/* Right Panel - Detail View */}
+            <div className="detail-panel">
+              {selectedItem ? (
+                <div className="detail-content">
+                  <div className="detail-header">
+                    <div className={`outcome-badge large ${selectedItem.result?.outcome || 'pending'}`}>
+                      {selectedItem.status === 'pending' && 'Pending'}
+                      {selectedItem.status === 'resolving' && 'Resolving...'}
+                      {selectedItem.status === 'verifying' && 'Verifying...'}
+                      {selectedItem.status === 'done' && selectedItem.result?.outcome === 'supported' && 'Verified'}
+                      {selectedItem.status === 'done' && selectedItem.result?.caseFound === false && 'Case Not Found'}
+                      {selectedItem.status === 'done' && selectedItem.result?.caseFound && selectedItem.result?.outcome !== 'supported' && 'Needs Review'}
+                    </div>
+                    {selectedItem.result?.confidence !== undefined && selectedItem.result.confidence > 0 && (
+                      <span className="confidence-score">{selectedItem.result.confidence}% match</span>
+                    )}
                   </div>
 
-                  <div className="results-summary">
-                    <div className="summary-stat">
-                      <span className="stat-value">{commentaryReport.search_metadata.cases_searched}</span>
-                      <span className="stat-label">Cases Searched</span>
-                    </div>
-                    <div className="summary-stat">
-                      <span className="stat-value">{commentaryReport.search_metadata.excerpts_found}</span>
-                      <span className="stat-label">Excerpts Found</span>
-                    </div>
-                    <div className="summary-stat">
-                      <span className="stat-value">
-                        {Object.keys(commentaryReport.lee_category_counts).filter(k => k !== 'general').length}
-                      </span>
-                      <span className="stat-label">Lee Categories</span>
-                    </div>
+                  <div className="detail-section">
+                    <h3>Case</h3>
+                    <p className="case-name-display">{selectedItem.caseName || 'Unknown Case Name'}</p>
+                    <p className="citation-display">{selectedItem.citation}</p>
+                    {selectedItem.result?.title && selectedItem.result.title !== selectedItem.caseName && (
+                      <p className="official-title">{selectedItem.result.title}</p>
+                    )}
+                    {selectedItem.result?.url && (
+                      <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link">
+                        View on {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'}
+                        <ExternalLink size={14} />
+                      </a>
+                    )}
                   </div>
 
-                  {/* Category breakdown */}
-                  {Object.entries(commentaryReport.lee_category_counts).length > 0 && (
-                    <div className="category-breakdown">
-                      <h3>Category Breakdown</h3>
-                      <div className="category-bars">
-                        {Object.entries(commentaryReport.lee_category_counts).map(([cat, count]) => (
-                          <div key={cat} className="category-bar">
-                            <span className="cat-label">
-                              {LEE_CATEGORIES[cat as keyof typeof LEE_CATEGORIES]?.name || cat}
-                            </span>
-                            <div className="bar-container">
-                              <div 
-                                className="bar-fill" 
-                                style={{ 
-                                  width: `${(count / commentaryReport.search_metadata.excerpts_found) * 100}%`,
-                                  background: LEE_CATEGORIES[cat as keyof typeof LEE_CATEGORIES]?.color || '#8b9bb4'
-                                }}
-                              />
-                            </div>
-                            <span className="cat-count">{count}</span>
-                          </div>
-                        ))}
-                      </div>
+                  <div className="detail-section">
+                    <h3>Proposition</h3>
+                    <p className="proposition-text">{selectedItem.proposition}</p>
+                  </div>
+
+                  {selectedItem.result?.notes && (
+                    <div className="detail-section">
+                      <h3>Notes</h3>
+                      <p className="notes-text">{selectedItem.result.notes}</p>
                     </div>
                   )}
 
-                  {/* Excerpts by case */}
-                  <div className="commentary-list">
-                    {commentaryReport.results.map((result, idx) => (
-                      <motion.div 
-                        key={idx}
-                        className="commentary-card"
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.1 }}
-                      >
-                        <div className="case-header">
-                          <h4>{result.case_name}</h4>
-                          <span className="case-citation">{result.citation}</span>
-                        </div>
-                        
-                        {result.excerpts.map((excerpt, exIdx) => (
-                          <div key={exIdx} className="excerpt-card">
-                            <div className="excerpt-meta">
-                              <span 
-                                className="lee-badge"
-                                style={{ background: LEE_CATEGORIES[excerpt.lee_category as keyof typeof LEE_CATEGORIES]?.color || '#8b9bb4' }}
+                  {selectedItem.result?.matchingParagraphs && selectedItem.result.matchingParagraphs.length > 0 && (
+                    <div className="detail-section matching-section">
+                      <h3>Matching Paragraphs</h3>
+                      {selectedItem.result.matchingParagraphs.map((para, idx) => (
+                        <div key={idx} className={`matching-para ${para.match_type}`}>
+                          <div className="para-meta">
+                            <span className="para-num">[{para.para_num}]</span>
+                            <span className={`match-badge ${para.match_type}`}>
+                              {Math.round(para.similarity_score * 100)}% match
+                            </span>
+                            {selectedItem.result?.url && (
+                              <a
+                                href={`${selectedItem.result.url}#para${para.para_num}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="para-link"
                               >
-                                {excerpt.lee_category === 'general' ? '•' : excerpt.lee_category}
-                              </span>
-                              <span className="lee-category-name">{excerpt.lee_category_name}</span>
-                              {excerpt.paragraph && <span className="para-ref">[{excerpt.paragraph}]</span>}
-                            </div>
-                            <blockquote className="excerpt-text">
-                              "{excerpt.text}"
-                            </blockquote>
-                            <div className="keywords-matched">
-                              {excerpt.keywords_matched.map((kw, kwIdx) => (
-                                <span key={kwIdx} className="keyword-chip">{kw}</span>
-                              ))}
-                            </div>
+                                Go to paragraph
+                              </a>
+                            )}
                           </div>
-                        ))}
-                      </motion.div>
-                    ))}
-                  </div>
+                          <p className="para-text">{para.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-                  <div className="audit-meta">
-                    <span>Searched: {new Date(commentaryReport.search_metadata.searched_at).toLocaleString()}</span>
-                  </div>
-                </motion.section>
-              )}
-            </AnimatePresence>
-          </>
-        )}
-
-        {/* ===== HOW IT WORKS TAB ===== */}
-        {activeTab === 'how-it-works' && (
-          <motion.div
-            className="how-it-works-page"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <h2>How It Works</h2>
-            
-            <div className="info-grid">
-              <div className="info-card featured">
-                <h3>⚖️ About Matthew Lee's Hallucination Taxonomy</h3>
-                <p>
-                  This tool is inspired by the work of <strong>Matthew Lee</strong>, a barrister (England & Wales) 
-                  who has extensively documented and categorised AI-generated citation errors in legal proceedings.
-                </p>
-                <p>
-                  Through his blog <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">Natural and Artificial Intelligence in Law</a>, 
-                  Matthew has tracked over <strong>30 UK cases</strong> involving hallucinated citations — cases where AI tools 
-                  have generated fabricated authorities, incorrect citations, or misstated legal principles.
-                </p>
-                <p>
-                  His <strong>8 Hallucination Categories</strong> provide a systematic framework for classifying these errors:
-                </p>
-                <ol className="lee-categories-list">
-                  <li><strong>Type 1:</strong> Fabricated Case & Citation — completely invented</li>
-                  <li><strong>Type 2:</strong> Wrong Case Name, Right Citation</li>
-                  <li><strong>Type 3:</strong> Right Case Name, Wrong Citation</li>
-                  <li><strong>Type 4:</strong> Conflated Authorities — merging multiple cases</li>
-                  <li><strong>Type 5:</strong> Correct Law, Invented Authority</li>
-                  <li><strong>Type 6:</strong> Real Case, Misstated Facts/Ratio</li>
-                  <li><strong>Type 7:</strong> Misleading Secondary Paraphrase</li>
-                  <li><strong>Type 8:</strong> False Citations Citing False</li>
-                </ol>
-                <p className="blog-link">
-                  <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">
-                    Visit Matthew Lee's Blog →
-                  </a>
-                </p>
-              </div>
-
-              <div className="info-card">
-                <h3>🔍 What This Tool Does</h3>
-                <p>
-                  This tool extracts legal citations from uploaded documents and attempts to retrieve 
-                  the referenced cases from <strong>Find Case Law</strong> (National Archives) and <strong>BAILII</strong>. 
-                  It then uses keyword matching to identify which paragraphs of the judgment may relate 
-                  to the propositions in your document.
-                </p>
-                <p>
-                  <strong>The goal:</strong> Save you time by automatically retrieving cases for manual verification, 
-                  giving you an indication of whether citations exist and where the relevant passages might be found.
-                </p>
-              </div>
-
-              <div className="info-card">
-                <h3>⚠️ Important Caveats</h3>
-                <ul>
-                  <li>
-                    <strong>Proof of Concept:</strong> This tool was created as a proof of concept in a single evening 
-                    using AI-assisted coding.
-                  </li>
-                  <li>
-                    <strong>Not AI Analysis:</strong> While the code was written with AI assistance, the verification 
-                    process itself does <em>not</em> use AI — it relies on pattern matching and keyword analysis.
-                  </li>
-                  <li>
-                    <strong>Always Verify:</strong> All sources and results should be independently checked. 
-                    This tool provides <em>indications</em>, not definitive answers.
-                  </li>
-                  <li>
-                    <strong>Do Not Rely Upon:</strong> This tool should not be relied upon for legal advice, 
-                    court submissions, or any professional legal work without thorough manual verification.
-                  </li>
-                </ul>
-              </div>
-
-              <div className="info-card">
-                <h3>📋 The Verification Process</h3>
-                <ol>
-                  <li><strong>Extract Citations:</strong> Regex patterns identify legal citations in your document</li>
-                  <li><strong>Resolve to URLs:</strong> Citations are matched to Find Case Law or BAILII URLs</li>
-                  <li><strong>Fetch Judgments:</strong> Full judgment text is retrieved from official sources</li>
-                  <li><strong>Parse Content:</strong> Judgments are parsed into paragraphs</li>
-                  <li><strong>Keyword Match:</strong> Your proposition is compared against judgment paragraphs</li>
-                  <li><strong>Display Results:</strong> Matching paragraphs are shown with direct links</li>
-                </ol>
-              </div>
-
-              <div className="info-card rate-limits-card">
-                <h3>⏱️ Rate Limits</h3>
-                <p>
-                  To be respectful to Find Case Law and BAILII, this tool enforces rate limits on queries:
-                </p>
-                <table className="rate-limits-table">
-                  <thead>
-                    <tr>
-                      <th>Source</th>
-                      <th>Limit</th>
-                      <th>Retry Behaviour</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Find Case Law</td>
-                      <td>1 request/sec</td>
-                      <td>Exponential backoff on 429</td>
-                    </tr>
-                    <tr>
-                      <td>BAILII</td>
-                      <td>1 request/sec</td>
-                      <td>Exponential backoff on 429</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <div className="rate-limit-modes">
-                  <div className="rate-limit-mode">
-                    <strong>🖥️ Fully Local Mode:</strong>
-                    <p>Rate limits are <span className="highlight-good">per-user</span>. You have your own 1 req/sec limit.</p>
-                  </div>
-                  <div className="rate-limit-mode">
-                    <strong>☁️ Hybrid/Online Modes:</strong>
-                    <p>Rate limits are <span className="highlight-caution">shared globally</span>. All users share the server's rate limit, which may cause delays during busy periods.</p>
-                  </div>
+                  {selectedItem.result?.caseFound === false && (
+                    <div className="warning-box">
+                      <AlertCircle size={18} />
+                      <div>
+                        <strong>Potential Type 1 Hallucination</strong>
+                        <p>This citation could not be found on BAILII or Find Case Law.
+                        The case may be fabricated, or may exist in a database we don't search.
+                        Please verify manually.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              <div className="info-card privacy-explained-card">
-                <h3>🔒 Privacy Mode Comparison</h3>
-                <table className="privacy-comparison-table">
-                  <thead>
-                    <tr>
-                      <th>Aspect</th>
-                      <th>🖥️ Fully Local</th>
-                      <th>🔀 Hybrid</th>
-                      <th>☁️ Fully Online</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Document Processing</td>
-                      <td className="cell-good">Your machine</td>
-                      <td className="cell-good">Your browser</td>
-                      <td className="cell-caution">Server</td>
-                    </tr>
-                    <tr>
-                      <td>Citation Resolution</td>
-                      <td className="cell-good">Your machine → FCL/BAILII</td>
-                      <td className="cell-neutral">Server → FCL/BAILII</td>
-                      <td className="cell-neutral">Server → FCL/BAILII</td>
-                    </tr>
-                    <tr>
-                      <td>Document Stored?</td>
-                      <td className="cell-good">Never</td>
-                      <td className="cell-good">Never</td>
-                      <td className="cell-good">Never</td>
-                    </tr>
-                    <tr>
-                      <td>Rate Limits</td>
-                      <td className="cell-good">Per-user</td>
-                      <td className="cell-caution">Shared</td>
-                      <td className="cell-caution">Shared</td>
-                    </tr>
-                    <tr>
-                      <td>Privileged Docs?</td>
-                      <td className="cell-good">✓ Safe</td>
-                      <td className="cell-good">✓ Safe</td>
-                      <td className="cell-bad">✗ Not recommended</td>
-                    </tr>
-                    <tr>
-                      <td>Web Search</td>
-                      <td colSpan={3} className="cell-neutral">Opt-in only. If enabled, citation text sent to search engines.</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              ) : (
+                <div className="detail-placeholder">
+                  <BookOpen size={48} />
+                  <p>Select a citation to view details</p>
+                </div>
+              )}
             </div>
-
-            <button 
-              className="back-to-audit-btn"
-              onClick={() => setActiveTab('audit')}
-            >
-              ← Back to Citation Audit
-            </button>
-          </motion.div>
+          </div>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="footer">
-        <div className="footer-content">
-          <div className="footer-main">
-            <p className="footer-title">Matthew Lee Bot © {new Date().getFullYear()}</p>
-            <p className="footer-powered">Powered by <a href="https://caselaw.nationalarchives.gov.uk/" target="_blank" rel="noopener noreferrer">Find Case Law</a> & <a href="https://www.bailii.org/" target="_blank" rel="noopener noreferrer">BAILII</a></p>
-          </div>
-          <div className="footer-developer">
-            <p>Developed by <a href="https://www.jamescockburn.io" target="_blank" rel="noopener noreferrer">James Cockburn</a>, Solicitor</p>
-          </div>
-        </div>
-        <div className="footer-disclaimer">
-          <p>
-            <strong>Disclaimer:</strong> This is an experimental tool for educational and research purposes only. 
-            It is not a substitute for professional legal research and should not be relied upon for legal advice, 
-            court submissions, or any professional legal work. The developers accept no liability for any errors, 
-            omissions, or consequences arising from its use. Always verify citations manually before relying on them 
-            in any legal context.
-          </p>
-        </div>
+      <footer className="footer-compact">
+        <span>Powered by <a href="https://caselaw.nationalarchives.gov.uk/" target="_blank" rel="noopener noreferrer">Find Case Law</a> & <a href="https://www.bailii.org/" target="_blank" rel="noopener noreferrer">BAILII</a></span>
+        <span className="separator">|</span>
+        <span>Developed by <a href="https://www.jamescockburn.io" target="_blank" rel="noopener noreferrer">James Cockburn</a></span>
       </footer>
     </div>
   )
