@@ -126,8 +126,8 @@ export function extractCaseNameFromText(text: string): string | undefined {
     }
   }
 
-  // Pattern 5: "The X" - ship/admiralty cases
-  const shipMatch = beforeCitation.match(/\b(The\s+[A-Z][A-Za-z0-9\s'']+?)$/);
+  // Pattern 5: "The X" or "The X (No 1)" - ship/admiralty cases
+  const shipMatch = beforeCitation.match(/\b(The\s+[A-Z][A-Za-z0-9\s'']+(?:\s*\([^)]+\))?)$/);
   if (shipMatch) {
     const shipName = cleanPartyName(shipMatch[1]);
     if (shipName) {

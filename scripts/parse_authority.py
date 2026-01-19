@@ -73,7 +73,7 @@ def parse_bailii_html(html_content: str) -> Dict[str, Any]:
         if court_match:
             court = court_match.group(2)
 
-    # Extract paragraphs
+    # Extract paragraphs - try numbered [N] format first
     paragraphs = []
     for p in soup.find_all("p"):
         text = p.get_text().strip()
@@ -98,6 +98,51 @@ def parse_bailii_html(html_content: str) -> Dict[str, Any]:
     full_text = soup.get_text(separator="\n")
     # Clean up whitespace
     full_text = "\n".join(line.strip() for line in full_text.splitlines() if line.strip())
+
+    # Fallback for older cases without [N] numbering:
+    # Extract substantial paragraphs from full text
+    if not paragraphs:
+        # Skip navigation/header content - look for judgment content
+        lines = full_text.split("\n")
+
+        # Find start of actual judgment (after case details)
+        start_idx = 0
+        for i, line in enumerate(lines):
+            # Look for common judgment start indicators
+            if any(marker in line.lower() for marker in ['judgment', 'lord ', 'the court', 'opinion']):
+                start_idx = i
+                break
+
+        # Group lines into paragraphs (blank lines separate paragraphs)
+        current_para = []
+        para_num = 1
+
+        for line in lines[start_idx:]:
+            if not line.strip():
+                # End of paragraph
+                if current_para:
+                    para_text = " ".join(current_para).strip()
+                    # Only include substantial paragraphs (likely judgment content)
+                    if len(para_text) > 100:
+                        paragraphs.append({
+                            "para_num": str(para_num),
+                            "text": para_text,
+                            "speaker": None
+                        })
+                        para_num += 1
+                    current_para = []
+            else:
+                current_para.append(line.strip())
+
+        # Don't forget last paragraph
+        if current_para:
+            para_text = " ".join(current_para).strip()
+            if len(para_text) > 100:
+                paragraphs.append({
+                    "para_num": str(para_num),
+                    "text": para_text,
+                    "speaker": None
+                })
 
     return {
         "title": title,
