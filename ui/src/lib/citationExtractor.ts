@@ -48,142 +48,166 @@ const TRADITIONAL_CITATION_PATTERNS = [
 ];
 
 /**
- * Extract case name from text using a simple, robust approach.
+ * Extract case name from text using a comprehensive approach.
  *
- * Based on SOTA research (eyecite, LexNLP), the most reliable method is:
- * 1. Find the "v" or "v." separator
- * 2. Capture everything before it that looks like a party name
- * 3. Capture everything after it up to the citation bracket
+ * UK case name patterns (per OSCOLA guidelines):
+ * 1. Party v Party - most common (Caparo Industries plc v Dickman)
+ * 2. R v X - criminal cases (R v Smith)
+ * 3. Re X / In re X / In the matter of X - bankruptcy, probate, etc.
+ * 4. Ex p X / Ex parte X - judicial review (often as "R v X, ex p Y")
+ * 5. The [Name] - admiralty/ship cases (The Wagon Mound)
  *
- * This handles cases like:
- * - "Caparo Industries plc v Dickman"
- * - "Hedley Byrne & Co Ltd v Heller & Partners Ltd"
- * - "R v Smith"
- * - "Re Atlantic Computers"
+ * The approach:
+ * 1. Look for text immediately before a citation bracket [year]
+ * 2. Parse backwards to find the case name using known patterns
+ * 3. Clean up common introductory phrases
  */
 export function extractCaseNameFromText(text: string): string | undefined {
-  // First, try to find "v" or "v." pattern in the text
-  // The key insight: look for " v " or " v. " as word boundaries
+  // Find where the citation starts (look for [year] pattern)
+  const citationStart = text.search(/\[\d{4}\]/);
 
-  // Pattern: capture text before "v"/"v." and text after, stopping at citation bracket [
-  // Using a simple split-based approach which is more robust than complex regex
+  // Get the text before the citation (or all text if no citation found)
+  const beforeCitation = citationStart > 0 ? text.slice(0, citationStart).trim() : text.trim();
 
-  // Find the position of " v " or " v. " (with word boundaries)
-  const vPatterns = [
-    /\s+v\.\s+/i,    // " v. "
-    /\s+v\s+/i,      // " v "
-  ];
-
-  let vMatch: RegExpExecArray | null = null;
-
-  for (const pattern of vPatterns) {
-    const match = pattern.exec(text);
-    if (match) {
-      vMatch = match;
-      break;
-    }
-  }
-
-  if (!vMatch || vMatch.index === undefined) {
-    // No "v" found, try "Re" or "In re" patterns
-    const reMatch = text.match(/\b((?:In\s+)?[Rr]e)\s+([A-Z][A-Za-z0-9''\-\.\s&]+?)(?=\s*[\[\(]|\s*$)/);
-    if (reMatch) {
-      return `${reMatch[1]} ${reMatch[2].trim()}`;
-    }
+  if (!beforeCitation) {
     return undefined;
   }
 
-  const vIndex = vMatch.index;
-  const vLength = vMatch[0].length;
+  // Try to extract case name using different patterns
+  // Order matters - try more specific patterns first
 
-  // Extract text before "v" - this is the plaintiff/appellant
-  const beforeV = text.slice(0, vIndex);
+  // Pattern 1: "R v X, ex p Y" or "R v X, Ex parte Y" (judicial review with ex parte)
+  const exParteMatch = beforeCitation.match(
+    /\b(R)\s+v\.?\s+([^,\[\]]+),?\s+(?:ex\s*p\.?|Ex\s+parte)\s+([A-Z][^\[\]]+?)$/i
+  );
+  if (exParteMatch) {
+    const court = exParteMatch[2].trim();
+    const applicant = cleanPartyName(exParteMatch[3]);
+    if (court && applicant) {
+      return `R v ${court}, ex p ${applicant}`;
+    }
+  }
 
-  // Extract text after "v" up to citation bracket or end
-  const afterV = text.slice(vIndex + vLength);
+  // Pattern 2: Standard "X v Y" pattern
+  const vMatch = beforeCitation.match(/\s+(v\.?)\s+/i);
+  if (vMatch && vMatch.index !== undefined) {
+    const beforeV = beforeCitation.slice(0, vMatch.index);
+    const afterV = beforeCitation.slice(vMatch.index + vMatch[0].length);
 
-  // Clean up plaintiff name - get the last "name-like" segment before v
-  // This handles cases where there's other text before the case name
-  const plaintiff = extractPartyName(beforeV, 'before');
+    const plaintiff = extractPlaintiffName(beforeV);
+    const defendant = cleanPartyName(afterV);
 
-  // Clean up defendant name - get text up to the citation bracket
-  const defendant = extractPartyName(afterV, 'after');
+    if (plaintiff && defendant) {
+      return `${plaintiff} v ${defendant}`;
+    }
+  }
 
-  if (plaintiff && defendant) {
-    return `${plaintiff} v ${defendant}`;
+  // Pattern 3: "Re X" / "In re X" / "In the matter of X"
+  const reMatch = beforeCitation.match(
+    /\b((?:In\s+the\s+matter\s+of|In\s+re|Re))\s+([A-Z][^\[\]]+?)$/i
+  );
+  if (reMatch) {
+    const prefix = reMatch[1].toLowerCase().includes('matter') ? 'Re' :
+                   reMatch[1].toLowerCase() === 'in re' ? 'Re' : 'Re';
+    const subject = cleanPartyName(reMatch[2]);
+    if (subject) {
+      return `${prefix} ${subject}`;
+    }
+  }
+
+  // Pattern 4: "Ex p X" / "Ex parte X" (standalone)
+  const standaloneExParte = beforeCitation.match(
+    /\b(?:ex\s*p\.?|Ex\s+parte)\s+([A-Z][^\[\]]+?)$/i
+  );
+  if (standaloneExParte) {
+    const applicant = cleanPartyName(standaloneExParte[1]);
+    if (applicant) {
+      return `Ex p ${applicant}`;
+    }
+  }
+
+  // Pattern 5: "The X" - ship/admiralty cases
+  const shipMatch = beforeCitation.match(/\b(The\s+[A-Z][A-Za-z0-9\s'']+?)$/);
+  if (shipMatch) {
+    const shipName = cleanPartyName(shipMatch[1]);
+    if (shipName) {
+      return shipName;
+    }
   }
 
   return undefined;
 }
 
 /**
- * Extract a party name from text, cleaning up common artifacts.
- *
- * @param text - The text to extract from
- * @param position - 'before' means text before "v", 'after' means text after "v"
+ * Extract plaintiff/claimant name from text before "v".
+ * Handles common introductory phrases and extracts the actual party name.
  */
-function extractPartyName(text: string, position: 'before' | 'after'): string | undefined {
+function extractPlaintiffName(text: string): string | undefined {
   if (!text || text.trim().length === 0) {
     return undefined;
   }
 
   let cleaned = text.trim();
 
-  if (position === 'before') {
-    // For text before "v", we want the last party-name-like segment
-    // Remove common prefixes like "In", "See", "per", etc.
+  // Split by common delimiters (semicolons, colons, sentence boundaries)
+  // and take the last segment which should contain the case name
+  const segments = cleaned.split(/[;:]|\.\s+(?=[A-Z])/);
+  cleaned = segments[segments.length - 1].trim();
 
-    // Split by common delimiters and take the last meaningful segment
-    const segments = cleaned.split(/[;:,]|\.\s+(?=[A-Z])/);
-    cleaned = segments[segments.length - 1].trim();
+  // Remove common introductory phrases
+  // These appear frequently before case citations in legal writing
+  const introPatterns = [
+    /^.*?\b(?:as\s+(?:stated|held|noted|decided|established|confirmed|affirmed)\s+(?:in|by))\s+/i,
+    /^.*?\b(?:following|per|see\s+also|see|cf\.?|compare)\s+/i,
+    /^.*?\b(?:in|the\s+case\s+of|the\s+decision\s+in)\s+/i,
+    /^.*?\b(?:citing|quoted\s+in|applied\s+in|approved\s+in|overruled\s+in)\s+/i,
+  ];
 
-    // Remove leading phrases like "As stated in", "See", "In", "per", etc.
-    // These are common introductory phrases before case names
-    cleaned = cleaned.replace(/^(?:as\s+(?:stated|held|noted|decided|established)\s+in|see\s+also|see|per|in|the|a|an)\s+/i, '');
-
-    // Remove leading lowercase words (likely not part of case name)
-    cleaned = cleaned.replace(/^[a-z][a-z\s]*(?=[A-Z])/g, '');
-
-  } else {
-    // For text after "v", stop at citation bracket or certain punctuation
-    // Find where the defendant name ends
-
-    // Stop at: [year], (year), common legal phrases, or end of meaningful text
-    const stopPatterns = [
-      /\s*\[\d{4}\]/,           // [1990]
-      /\s*\(\d{4}\)/,           // (1990)
-      /\s*\[20\d{2}\]/,         // [2015]
-      /\s*,\s*(?:at|para|p\.)/i, // ", at para"
-      /\s+held\s+/i,            // " held "
-      /\s+where\s+/i,           // " where "
-      /\s+the\s+court\s+/i,     // " the court "
-      /\s+it\s+was\s+/i,        // " it was "
-    ];
-
-    let stopIndex = cleaned.length;
-    for (const pattern of stopPatterns) {
-      const match = pattern.exec(cleaned);
-      if (match && match.index !== undefined && match.index < stopIndex) {
-        stopIndex = match.index;
-      }
+  for (const pattern of introPatterns) {
+    const match = cleaned.match(pattern);
+    if (match) {
+      cleaned = cleaned.slice(match[0].length).trim();
+      break;
     }
-
-    cleaned = cleaned.slice(0, stopIndex).trim();
   }
 
-  // Final cleanup - normalize whitespace
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  // Remove any remaining leading lowercase text before a capital letter
+  cleaned = cleaned.replace(/^[a-z][a-z\s,]*(?=[A-Z])/g, '');
 
-  // Remove trailing punctuation
-  cleaned = cleaned.replace(/[,;:\.]$/, '').trim();
+  return cleanPartyName(cleaned);
+}
 
-  // Validate: should start with capital letter and be reasonable length
-  if (cleaned.length < 1 || cleaned.length > 100) {
+/**
+ * Clean up a party name by removing trailing artifacts and normalizing.
+ */
+function cleanPartyName(text: string): string | undefined {
+  if (!text || text.trim().length === 0) {
     return undefined;
   }
 
-  // Should contain at least one capital letter
+  let cleaned = text.trim();
+
+  // Normalize whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ');
+
+  // Remove trailing punctuation and artifacts
+  cleaned = cleaned.replace(/[,;:\.\s]+$/, '').trim();
+
+  // Remove trailing "and others", "& Ors", etc.
+  cleaned = cleaned.replace(/\s*(?:and\s+(?:others?|another)|&\s*(?:Ors?|Others?))\s*$/i, '');
+
+  // Validate: must have reasonable length
+  if (cleaned.length < 1 || cleaned.length > 150) {
+    return undefined;
+  }
+
+  // Must contain at least one capital letter (party names are capitalized)
   if (!/[A-Z]/.test(cleaned)) {
+    return undefined;
+  }
+
+  // Shouldn't start with lowercase (unless it's a known prefix like "ex")
+  if (/^[a-z]/.test(cleaned) && !/^(?:ex\s|de\s)/i.test(cleaned)) {
     return undefined;
   }
 
