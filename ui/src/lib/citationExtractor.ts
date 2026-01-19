@@ -290,30 +290,46 @@ export function extractCitations(text: string): ExtractedCitation[] {
   return citations;
 }
 
+export interface SourceParagraph {
+  paragraphNumber: number;
+  text: string;           // The full paragraph text
+  citationPosition: number; // Character position of citation in paragraph
+}
+
 /**
  * Extract propositions/claims from text around citations
- * Uses rule-based extraction (no AI)
+ * Returns the actual source paragraph from the document
  */
 export function extractPropositions(text: string): Array<{
   proposition: string;
+  sourceParagraph: SourceParagraph;
   citations: ExtractedCitation[];
 }> {
-  const results: Array<{ proposition: string; citations: ExtractedCitation[] }> = [];
-  
-  // Split into sentences/paragraphs
-  const sentences = text.split(/(?<=[.!?])\s+(?=[A-Z])/);
-  
-  for (const sentence of sentences) {
-    const citations = extractCitations(sentence);
-    
+  const results: Array<{
+    proposition: string;
+    sourceParagraph: SourceParagraph;
+    citations: ExtractedCitation[];
+  }> = [];
+
+  // Split into paragraphs (double newline or numbered paragraphs)
+  const paragraphs = splitIntoParagraphs(text);
+
+  for (let paraIndex = 0; paraIndex < paragraphs.length; paraIndex++) {
+    const para = paragraphs[paraIndex];
+    const citations = extractCitations(para.text);
+
     if (citations.length > 0) {
-      // Clean up the proposition text
-      let proposition = sentence
+      // Find position of first citation in paragraph
+      const firstCitationMatch = para.text.match(/\[\d{4}\]/);
+      const citationPosition = firstCitationMatch?.index || 0;
+
+      // The proposition is the cleaned version for matching
+      let proposition = para.text
         .replace(/\[\d{4}\]\s+(?:UKSC|UKPC|UKHL|EWCA|EWHC|UKUT|UKEAT|CSIH|CSOH)[^\]]*\d+/gi, '')
         .replace(/\[\d{4}\]\s+\d*\s*(?:AC|QB|Ch|Fam|WLR|All\s+ER)\s+\d+/gi, '')
         .replace(/\s+/g, ' ')
         .trim();
-      
+
       // Remove citation artifacts
       proposition = proposition
         .replace(/\s*,\s*,/g, ',')
@@ -321,14 +337,82 @@ export function extractPropositions(text: string): Array<{
         .replace(/^\s*[,;]\s*/, '')
         .replace(/\s*[,;]\s*$/, '')
         .trim();
-      
+
       if (proposition.length > 20) {
-        results.push({ proposition, citations });
+        results.push({
+          proposition,
+          sourceParagraph: {
+            paragraphNumber: para.number,
+            text: para.text.trim(),
+            citationPosition
+          },
+          citations
+        });
       }
     }
   }
-  
+
   return results;
+}
+
+/**
+ * Split document text into numbered paragraphs
+ */
+function splitIntoParagraphs(text: string): Array<{ number: number; text: string }> {
+  const paragraphs: Array<{ number: number; text: string }> = [];
+
+  // Try to detect numbered paragraphs first (common in legal docs)
+  // Pattern: "1." or "(1)" or "[1]" at start of line
+  const numberedPattern = /(?:^|\n\n?)(\d{1,3})\.\s+/g;
+  const bracketPattern = /(?:^|\n\n?)\[(\d{1,3})\]\s*/g;
+  const parenPattern = /(?:^|\n\n?)\((\d{1,3})\)\s+/g;
+
+  // Check which pattern is most common
+  const numberedMatches = [...text.matchAll(numberedPattern)];
+  const bracketMatches = [...text.matchAll(bracketPattern)];
+  const parenMatches = [...text.matchAll(parenPattern)];
+
+  let matches: RegExpMatchArray[] = [];
+  let pattern: RegExp;
+
+  if (bracketMatches.length >= numberedMatches.length && bracketMatches.length >= parenMatches.length && bracketMatches.length > 2) {
+    matches = bracketMatches;
+    pattern = /\[(\d{1,3})\]\s*/;
+  } else if (numberedMatches.length >= parenMatches.length && numberedMatches.length > 2) {
+    matches = numberedMatches;
+    pattern = /(\d{1,3})\.\s+/;
+  } else if (parenMatches.length > 2) {
+    matches = parenMatches;
+    pattern = /\((\d{1,3})\)\s+/;
+  }
+
+  if (matches.length > 2) {
+    // Extract paragraphs using detected pattern
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const startPos = match.index! + match[0].length;
+      const endPos = i < matches.length - 1 ? matches[i + 1].index! : text.length;
+      const paraNum = parseInt(match[1], 10);
+      const paraText = text.slice(startPos, endPos).trim();
+
+      if (paraText.length > 10) {
+        paragraphs.push({ number: paraNum, text: paraText });
+      }
+    }
+  }
+
+  // Fallback: split by double newlines
+  if (paragraphs.length === 0) {
+    const chunks = text.split(/\n\n+/);
+    chunks.forEach((chunk, idx) => {
+      const trimmed = chunk.trim();
+      if (trimmed.length > 20) {
+        paragraphs.push({ number: idx + 1, text: trimmed });
+      }
+    });
+  }
+
+  return paragraphs;
 }
 
 /**

@@ -13,7 +13,8 @@ import {
   X,
   Info,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  Search
 } from 'lucide-react'
 import './App.css'
 
@@ -23,11 +24,24 @@ import { extractCitations, extractPropositions, formatCitation, extractCaseNameF
 import { findMatchingParagraphs, calculateConfidence, determineOutcome } from './lib/verifier'
 import { resolveCitations } from './lib/api'
 
+interface SourceParagraph {
+  paragraphNumber: number
+  text: string
+  citationPosition: number
+}
+
+interface JudgmentParagraph {
+  para_num: string
+  text: string
+  speaker?: string
+}
+
 interface ExtractedCitationItem {
   id: string
   caseName: string | null
   citation: string
   proposition: string
+  sourceParagraph?: SourceParagraph  // The actual paragraph from the document
   status: 'pending' | 'resolving' | 'verifying' | 'done' | 'error'
   result?: {
     outcome: 'supported' | 'contradicted' | 'unclear' | 'unverifiable' | 'needs_review'
@@ -37,6 +51,7 @@ interface ExtractedCitationItem {
     title?: string
     confidence?: number
     notes?: string
+    judgmentParagraphs?: JudgmentParagraph[]  // Full judgment for embedded viewer
     matchingParagraphs?: Array<{
       para_num: string
       text: string
@@ -82,6 +97,9 @@ function App() {
 
   // Selected citation for detail view
   const [selectedCitation, setSelectedCitation] = useState<string | null>(null)
+
+  // Judgment viewer search
+  const [judgmentSearch, setJudgmentSearch] = useState('')
 
   // File handlers
   const handleDrag = (e: React.DragEvent) => {
@@ -156,6 +174,7 @@ function App() {
               caseName,
               citation: cit.raw,
               proposition: prop.proposition,
+              sourceParagraph: prop.sourceParagraph,  // Store the actual document paragraph
               status: 'pending'
             })
           })
@@ -282,6 +301,11 @@ function App() {
               notes: matches.length > 0
                 ? `Case verified. Found ${matches.length} matching paragraph(s).`
                 : 'Case verified on BAILII/FCL. No keyword matches for proposition specifics.',
+              judgmentParagraphs: resolved.paragraphs.map(p => ({
+                para_num: p.para_num,
+                text: p.text,
+                speaker: p.speaker
+              })),
               matchingParagraphs: matches.map(m => ({
                 para_num: m.para_num,
                 text: m.text.slice(0, 400) + (m.text.length > 400 ? '...' : ''),
@@ -694,50 +718,15 @@ function App() {
                     {selectedItem.result?.title && selectedItem.result.title !== selectedItem.caseName && (
                       <p className="official-title">{selectedItem.result.title}</p>
                     )}
-                    {selectedItem.result?.url && (
-                      <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link">
-                        View on {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'}
-                        <ExternalLink size={14} />
-                      </a>
-                    )}
                   </div>
 
-                  <div className="detail-section">
-                    <h3>Proposition</h3>
-                    <p className="proposition-text">{selectedItem.proposition}</p>
-                  </div>
-
-                  {selectedItem.result?.notes && (
-                    <div className="detail-section">
-                      <h3>Notes</h3>
-                      <p className="notes-text">{selectedItem.result.notes}</p>
-                    </div>
-                  )}
-
-                  {selectedItem.result?.matchingParagraphs && selectedItem.result.matchingParagraphs.length > 0 && (
-                    <div className="detail-section matching-section">
-                      <h3>Matching Paragraphs</h3>
-                      {selectedItem.result.matchingParagraphs.map((para, idx) => (
-                        <div key={idx} className={`matching-para ${para.match_type}`}>
-                          <div className="para-meta">
-                            <span className="para-num">[{para.para_num}]</span>
-                            <span className={`match-badge ${para.match_type}`}>
-                              {Math.round(para.similarity_score * 100)}% match
-                            </span>
-                            {selectedItem.result?.url && (
-                              <a
-                                href={`${selectedItem.result.url}#para${para.para_num}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="para-link"
-                              >
-                                Go to paragraph
-                              </a>
-                            )}
-                          </div>
-                          <p className="para-text">{para.text}</p>
-                        </div>
-                      ))}
+                  {/* Source Paragraph from Document */}
+                  {selectedItem.sourceParagraph && (
+                    <div className="detail-section source-section">
+                      <h3>Source Paragraph <span className="para-badge">[{selectedItem.sourceParagraph.paragraphNumber}]</span></h3>
+                      <div className="source-paragraph">
+                        <p>{selectedItem.sourceParagraph.text}</p>
+                      </div>
                     </div>
                   )}
 
@@ -750,6 +739,82 @@ function App() {
                         The case may be fabricated, or may exist in a database we don't search.
                         Please verify manually.</p>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Embedded Judgment Viewer with Search */}
+                  {selectedItem.result?.judgmentParagraphs && selectedItem.result.judgmentParagraphs.length > 0 && (
+                    <div className="detail-section judgment-viewer-section">
+                      <div className="judgment-header">
+                        <h3>Judgment Text</h3>
+                        {selectedItem.result?.url && (
+                          <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link-small">
+                            Open Full <ExternalLink size={12} />
+                          </a>
+                        )}
+                      </div>
+                      <div className="judgment-search">
+                        <Search size={14} />
+                        <input
+                          type="text"
+                          placeholder="Search judgment..."
+                          value={judgmentSearch}
+                          onChange={(e) => setJudgmentSearch(e.target.value)}
+                        />
+                        {judgmentSearch && (
+                          <button className="clear-search" onClick={() => setJudgmentSearch('')}>
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                      <div className="judgment-content">
+                        {(() => {
+                          const searchLower = judgmentSearch.toLowerCase()
+                          const matchingParaNums = new Set(selectedItem.result?.matchingParagraphs?.map(m => m.para_num) || [])
+
+                          const filteredParas = judgmentSearch
+                            ? selectedItem.result?.judgmentParagraphs?.filter(p =>
+                                p.text.toLowerCase().includes(searchLower) ||
+                                p.para_num.includes(judgmentSearch)
+                              )
+                            : selectedItem.result?.judgmentParagraphs
+
+                          if (!filteredParas || filteredParas.length === 0) {
+                            return <p className="no-results">No matching paragraphs found</p>
+                          }
+
+                          return filteredParas.map((para, idx) => {
+                            const isMatch = matchingParaNums.has(para.para_num)
+                            let displayText = para.text
+
+                            // Highlight search terms
+                            if (judgmentSearch) {
+                              const regex = new RegExp(`(${judgmentSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+                              displayText = para.text.replace(regex, '<mark>$1</mark>')
+                            }
+
+                            return (
+                              <div
+                                key={idx}
+                                className={`judgment-para ${isMatch ? 'highlighted' : ''}`}
+                                id={`para-${para.para_num}`}
+                              >
+                                <span className="para-num">[{para.para_num}]</span>
+                                {para.speaker && <span className="para-speaker">{para.speaker}:</span>}
+                                <p dangerouslySetInnerHTML={{ __html: displayText }} />
+                                {isMatch && <span className="match-indicator">Match</span>}
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedItem.result?.notes && (
+                    <div className="detail-section notes-section">
+                      <h3>Notes</h3>
+                      <p className="notes-text">{selectedItem.result.notes}</p>
                     </div>
                   )}
                 </div>

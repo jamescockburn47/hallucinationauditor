@@ -1269,10 +1269,109 @@ class CitationResolveResponse(BaseModel):
     summary: Dict[str, int]
 
 
+def resolve_single_citation(ctx: dict, web_search_enabled: bool) -> ResolvedCitation:
+    """
+    Resolve a single citation. Used for parallel processing.
+
+    Args:
+        ctx: Dict with citation, case_name, claim_text
+        web_search_enabled: Whether to use web search fallback
+
+    Returns:
+        ResolvedCitation object
+    """
+    citation_text = ctx["citation"]
+    if not citation_text:
+        return ResolvedCitation(
+            citation="",
+            source_type="not_found",
+            error="Empty citation"
+        )
+
+    case_name = ctx.get("case_name") or extract_case_name_from_citation(citation_text)
+
+    try:
+        # Resolve citation to URL
+        resolution = resolve_citation_to_urls(
+            citation_text=citation_text,
+            case_name=case_name,
+            enable_web_search=web_search_enabled
+        )
+
+        # Check if resolution was successful
+        if resolution and resolution.get("resolution_status") == "resolved" and resolution.get("candidate_urls"):
+            candidate = resolution["candidate_urls"][0]
+            url = candidate["url"]
+            source_type = candidate.get("source", "unknown")
+            title = resolution.get("case_name") or case_name
+
+            # Fetch and parse the judgment
+            paragraphs = []
+            try:
+                job_id = f"resolve_{uuid.uuid4().hex[:8]}"
+                ensure_cache_dir(job_id)
+
+                # Fetch the document
+                fetch_result = fetch_and_cache_url(
+                    job_id=job_id,
+                    url=url
+                )
+
+                if fetch_result and fetch_result.get("cache_path"):
+                    # Parse it
+                    parsed = parse_authority_document(
+                        fetch_result["cache_path"],
+                        url=url
+                    )
+
+                    if parsed and parsed.get("paragraphs"):
+                        # Return simplified paragraphs
+                        paragraphs = [
+                            {
+                                "para_num": p.get("para_num", str(i+1)),
+                                "text": p.get("text", "")[:500],  # Limit text length
+                                "speaker": p.get("speaker")
+                            }
+                            for i, p in enumerate(parsed["paragraphs"])
+                            if p.get("text") and len(p.get("text", "")) > 20
+                        ][:100]  # Limit to 100 paragraphs
+
+            except Exception as e:
+                logger.error(f"Error fetching/parsing {url}: {e}")
+
+            return ResolvedCitation(
+                citation=citation_text,
+                case_name=case_name or title,
+                source_type=source_type,
+                url=url,
+                title=title,
+                paragraphs=paragraphs
+            )
+
+        else:
+            return ResolvedCitation(
+                citation=citation_text,
+                case_name=case_name,
+                source_type="not_found",
+                error="Citation could not be resolved to a URL"
+            )
+
+    except Exception as e:
+        logger.error(f"Error resolving {citation_text}: {e}")
+        return ResolvedCitation(
+            citation=citation_text,
+            case_name=case_name,
+            source_type="not_found",
+            error=str(e)
+        )
+
+
 @app.post("/api/resolve-citations", response_model=CitationResolveResponse)
 async def resolve_citations_only(request: CitationResolveRequest):
     """
     Resolve citations to URLs and fetch judgment paragraphs.
+
+    OPTIMIZED: Uses parallel processing for faster resolution.
 
     This endpoint accepts citation strings with optional case names.
     For use with client-side document parsing where the browser handles
@@ -1281,6 +1380,9 @@ async def resolve_citations_only(request: CitationResolveRequest):
     Privacy: Only citation strings and case names are processed.
     No document content is sent to this endpoint.
     """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
     # Build unified list of citations with context
     citations_to_process = []
 
@@ -1306,114 +1408,45 @@ async def resolve_citations_only(request: CitationResolveRequest):
                     "claim_text": None
                 })
 
-    logger.info(f"Resolving {len(citations_to_process)} citations (client-side mode)")
+    num_citations = len(citations_to_process)
+    logger.info(f"Resolving {num_citations} citations in parallel (client-side mode)")
 
-    resolved_citations = []
-    summary = {"total": len(citations_to_process), "found": 0, "not_found": 0}
+    if num_citations == 0:
+        return CitationResolveResponse(
+            resolved=[],
+            summary={"total": 0, "found": 0, "not_found": 0}
+        )
 
-    for ctx in citations_to_process:
-        citation_text = ctx["citation"]
-        if not citation_text:
-            continue
+    # Use ThreadPoolExecutor for parallel I/O-bound operations
+    # Limit concurrency to avoid overwhelming external services
+    max_workers = min(num_citations, 5)
 
-        # Use provided case name or try to extract from citation string
-        case_name = ctx.get("case_name") or extract_case_name_from_citation(citation_text)
-
-        logger.info(f"Processing citation: {citation_text}, case_name: {case_name}")
-        
-        try:
-            # Resolve citation to URL
-            resolution = resolve_citation_to_urls(
-                citation_text=citation_text,
-                case_name=case_name,
-                enable_web_search=request.web_search_enabled
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all citation resolutions in parallel
+        futures = [
+            loop.run_in_executor(
+                executor,
+                resolve_single_citation,
+                ctx,
+                request.web_search_enabled
             )
-            
-            # Check if resolution was successful
-            if resolution and resolution.get("resolution_status") == "resolved" and resolution.get("candidate_urls"):
-                candidate = resolution["candidate_urls"][0]
-                url = candidate["url"]
-                source_type = candidate.get("source", "unknown")
-                title = resolution.get("case_name") or case_name
-                
-                # Fetch and parse the judgment
-                paragraphs = []
-                try:
-                    job_id = f"resolve_{uuid.uuid4().hex[:8]}"
-                    cache_dir = ensure_cache_dir(job_id)
+            for ctx in citations_to_process
+        ]
 
-                    logger.info(f"Fetching judgment from: {url}")
+        # Wait for all to complete
+        resolved_citations = await asyncio.gather(*futures)
 
-                    # Fetch the document
-                    fetch_result = fetch_and_cache_url(
-                        job_id=job_id,
-                        url=url
-                    )
+    # Calculate summary
+    found = sum(1 for r in resolved_citations if r.source_type != "not_found")
+    not_found = len(resolved_citations) - found
 
-                    logger.info(f"Fetch result: {fetch_result}")
+    summary = {"total": num_citations, "found": found, "not_found": not_found}
 
-                    if fetch_result and fetch_result.get("cache_path"):
-                        # Parse it
-                        parsed = parse_authority_document(
-                            fetch_result["cache_path"],
-                            url=url
-                        )
+    logger.info(f"Resolution complete: {found} found, {not_found} not found")
 
-                        logger.info(f"Parsed result keys: {parsed.keys() if parsed else 'None'}")
-                        if parsed:
-                            logger.info(f"Paragraphs count: {len(parsed.get('paragraphs', []))}")
-
-                        if parsed and parsed.get("paragraphs"):
-                            # Return simplified paragraphs
-                            paragraphs = [
-                                {
-                                    "para_num": p.get("para_num", str(i+1)),
-                                    "text": p.get("text", "")[:500],  # Limit text length
-                                    "speaker": p.get("speaker")
-                                }
-                                for i, p in enumerate(parsed["paragraphs"])
-                                if p.get("text") and len(p.get("text", "")) > 20
-                            ][:100]  # Limit to 100 paragraphs
-                            logger.info(f"Returning {len(paragraphs)} paragraphs")
-                        else:
-                            logger.warning(f"No paragraphs parsed from {url}")
-                    else:
-                        logger.warning(f"Fetch failed or no cache_path for {url}: {fetch_result}")
-
-                except Exception as e:
-                    logger.error(f"Error fetching/parsing {url}: {e}", exc_info=True)
-                
-                resolved_citations.append(ResolvedCitation(
-                    citation=citation_text,
-                    case_name=case_name or title,
-                    source_type=source_type,
-                    url=url,
-                    title=title,
-                    paragraphs=paragraphs
-                ))
-                summary["found"] += 1
-                
-            else:
-                resolved_citations.append(ResolvedCitation(
-                    citation=citation_text,
-                    case_name=case_name,
-                    source_type="not_found",
-                    error="Citation could not be resolved to a URL"
-                ))
-                summary["not_found"] += 1
-                
-        except Exception as e:
-            logger.error(f"Error resolving {citation_text}: {e}")
-            resolved_citations.append(ResolvedCitation(
-                citation=citation_text,
-                case_name=case_name,
-                source_type="not_found",
-                error=str(e)
-            ))
-            summary["not_found"] += 1
-    
     return CitationResolveResponse(
-        resolved=resolved_citations,
+        resolved=list(resolved_citations),
         summary=summary
     )
 

@@ -1192,3 +1192,207 @@ html, body {
     display: none;
   }
 }
+
+/* ===== SOURCE PARAGRAPH SECTION ===== */
+.source-section {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-md);
+  padding: 1rem !important;
+  margin-bottom: 1.5rem !important;
+  border: 1px solid var(--border-subtle) !important;
+}
+
+.source-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.para-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: var(--color-bg-input);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+}
+
+.source-paragraph {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--color-bg-input);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-accent);
+}
+
+.source-paragraph p {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ===== JUDGMENT VIEWER SECTION ===== */
+.judgment-viewer-section {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-md);
+  padding: 0 !important;
+  margin-bottom: 1.5rem !important;
+  border: 1px solid var(--border-subtle) !important;
+  overflow: hidden;
+}
+
+.judgment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.judgment-header h3 {
+  margin: 0 !important;
+  font-size: 0.75rem;
+}
+
+.source-link-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.source-link-small:hover {
+  color: var(--color-accent-light);
+}
+
+.judgment-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--color-bg-input);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.judgment-search svg {
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+.judgment-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.judgment-search input::placeholder {
+  color: var(--color-text-dim);
+}
+
+.clear-search {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: var(--color-bg-card);
+  border: none;
+  border-radius: 50%;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.clear-search:hover {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+.judgment-content {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.judgment-para {
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--color-bg-input);
+  border-radius: var(--radius-sm);
+  position: relative;
+  border-left: 3px solid transparent;
+  transition: all 0.15s;
+}
+
+.judgment-para:hover {
+  background: var(--color-bg-elevated);
+}
+
+.judgment-para.highlighted {
+  border-left-color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.judgment-para .para-num {
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--color-accent);
+  font-family: 'JetBrains Mono', monospace;
+  margin-right: 0.5rem;
+}
+
+.judgment-para .para-speaker {
+  font-size: 0.8rem;
+  color: var(--color-info);
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
+.judgment-para p {
+  display: inline;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.judgment-para p mark {
+  background: var(--color-warning);
+  color: var(--color-bg);
+  padding: 0 0.15rem;
+  border-radius: 2px;
+}
+
+.match-indicator {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.15rem 0.4rem;
+  background: var(--color-success);
+  color: white;
+  border-radius: 3px;
+}
+
+.no-results {
+  text-align: center;
+  padding: 2rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+/* Notes section styling */
+.notes-section {
+  padding-top: 0.5rem !important;
+  border-bottom: none !important;
+}
