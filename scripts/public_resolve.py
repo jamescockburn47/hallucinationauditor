@@ -631,6 +631,11 @@ def try_bailii_citation_finder(citation_text: str, timeout: int = 30) -> Optiona
         if response.status_code != 200:
             return None
 
+        # Check if we got redirected to the error page
+        if 'error.bailii.org' in response.url:
+            logger.debug(f"BAILII citation finder: redirected to error page for {clean_citation}")
+            return None
+
         # Check if we got a case page (redirect) or the search page (not found)
         try:
             from bs4 import BeautifulSoup
@@ -638,14 +643,19 @@ def try_bailii_citation_finder(citation_text: str, timeout: int = 30) -> Optiona
             title_elem = soup.find('title')
             if title_elem:
                 title = title_elem.get_text().strip()
-                # If we're still on the search page, the case wasn't found
-                if 'Find by citation' in title:
+                # If we're still on the search page or error page, the case wasn't found
+                if 'Find by citation' in title or 'error' in title.lower():
                     logger.debug(f"BAILII citation finder: not found for {clean_citation}")
                     return None
 
                 # We found the case! Extract URL from the final redirect
                 # The response.url should be the case page URL
                 case_url = response.url
+
+                # Double-check the URL is valid (not an error page)
+                if 'error' in case_url.lower() or '/cgi-bin/' in case_url:
+                    logger.debug(f"BAILII citation finder: invalid URL {case_url}")
+                    return None
 
                 logger.info(f"BAILII citation finder: found {title[:60]} at {case_url}")
                 return {
