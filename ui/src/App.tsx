@@ -36,7 +36,7 @@ interface SourceParagraph {
 interface JudgmentParagraph {
   para_num: string
   text: string
-  speaker?: string
+  speaker?: string | null
 }
 
 interface ExtractedCitationItem {

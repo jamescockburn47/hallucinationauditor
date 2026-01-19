@@ -373,17 +373,13 @@ function splitIntoParagraphs(text: string): Array<{ number: number; text: string
   const parenMatches = [...text.matchAll(parenPattern)];
 
   let matches: RegExpMatchArray[] = [];
-  let pattern: RegExp;
 
   if (bracketMatches.length >= numberedMatches.length && bracketMatches.length >= parenMatches.length && bracketMatches.length > 2) {
     matches = bracketMatches;
-    pattern = /\[(\d{1,3})\]\s*/;
   } else if (numberedMatches.length >= parenMatches.length && numberedMatches.length > 2) {
     matches = numberedMatches;
-    pattern = /(\d{1,3})\.\s+/;
   } else if (parenMatches.length > 2) {
     matches = parenMatches;
-    pattern = /\((\d{1,3})\)\s+/;
   }
 
   if (matches.length > 2) {
