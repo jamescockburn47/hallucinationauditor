@@ -54,13 +54,14 @@ html, body {
   background: var(--color-bg);
   color: var(--color-text);
   line-height: 1.5;
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
+  min-height: 100dvh; /* Dynamic viewport height for mobile */
   -webkit-font-smoothing: antialiased;
 }
 
 #root {
-  height: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
 }
 
 .grain-overlay {
@@ -73,10 +74,10 @@ html, body {
 }
 
 .app {
-  height: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 /* ===== COMPACT HEADER ===== */
@@ -149,7 +150,7 @@ html, body {
 /* ===== MAIN CONTAINER ===== */
 .main-container {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
   display: flex;
 }
 
@@ -159,10 +160,13 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 2rem;
+  padding-top: 3rem;
+  padding-bottom: 3rem;
   max-width: 600px;
   margin: 0 auto;
+  width: 100%;
 }
 
 .upload-hero {
@@ -1845,6 +1849,51 @@ html, body {
 
 /* Mobile touch improvements */
 @media (max-width: 768px) {
+  .header-compact {
+    padding: 0.5rem 1rem;
+  }
+
+  .logo-text h1 {
+    font-size: 1rem;
+  }
+
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .logo-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .how-it-works-btn {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.75rem;
+  }
+
+  .footer-compact {
+    padding: 0.5rem 1rem;
+    font-size: 0.65rem;
+    flex-wrap: wrap;
+    text-align: center;
+    gap: 0.25rem;
+  }
+
+  .upload-view {
+    padding: 1.5rem 1rem;
+    padding-top: 1.5rem;
+    padding-bottom: 2rem;
+  }
+
+  .landing-hero h1 {
+    font-size: 1.75rem;
+  }
+
+  .hero-subtitle {
+    font-size: 0.9rem;
+  }
+
   .upload-zone-large {
     padding: 2rem 1rem;
     min-height: 120px;
@@ -1861,6 +1910,17 @@ html, body {
   }
 
   .upload-text {
+    font-size: 0.9rem;
+  }
+
+  .privacy-note {
+    margin: 0.75rem auto;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.7rem;
+  }
+
+  .extract-btn-large {
+    padding: 0.875rem 1.5rem;
     font-size: 0.9rem;
   }
 }
@@ -2158,6 +2218,7 @@ html, body {
   background: var(--color-bg);
   z-index: 2000;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   justify-content: center;
 }
@@ -2166,6 +2227,7 @@ html, body {
   max-width: 800px;
   padding: 3rem 2rem 4rem;
   margin: 0 auto;
+  width: 100%;
 }
 
 .splash-header {
@@ -2445,19 +2507,104 @@ html, body {
 /* Responsive splash */
 @media (max-width: 600px) {
   .splash-content {
-    padding: 2rem 1rem 3rem;
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  .splash-header {
+    margin-bottom: 2rem;
   }
 
   .splash-header h1 {
-    font-size: 2rem;
+    font-size: 1.75rem;
+  }
+
+  .splash-tagline {
+    font-size: 0.95rem;
+  }
+
+  .splash-section {
+    margin-bottom: 1.75rem;
   }
 
   .splash-section h2 {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
+  }
+
+  .splash-section p {
+    font-size: 0.9rem;
   }
 
   .splash-logo {
-    width: 60px;
-    height: 60px;
+    width: 56px;
+    height: 56px;
+    margin-bottom: 1rem;
+  }
+
+  .splash-logo svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .splash-motto {
+    margin-bottom: 2rem;
+    padding: 1rem 1.25rem;
+  }
+
+  .splash-motto p {
+    font-size: 1rem;
+  }
+
+  .splash-step {
+    padding: 0.75rem;
+  }
+
+  .step-num {
+    width: 28px;
+    height: 28px;
+    font-size: 0.8rem;
+  }
+
+  .splash-step strong {
+    font-size: 0.9rem;
+  }
+
+  .splash-step p {
+    font-size: 0.8rem;
+  }
+
+  .splash-accept {
+    margin-top: 2rem;
+    padding: 1.5rem 1rem;
+  }
+
+  .accept-text {
+    font-size: 0.85rem;
+  }
+
+  .continue-btn {
+    padding: 0.875rem 1.5rem;
+    font-size: 0.95rem;
+    width: 100%;
+  }
+
+  .example-item {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .example-item strong {
+    font-size: 0.85rem;
+  }
+
+  .example-item span {
+    font-size: 0.8rem;
+  }
+
+  .disclaimer-list li {
+    font-size: 0.85rem;
+  }
+
+  .deterministic-badge {
+    font-size: 0.8rem;
+    padding: 0.6rem 1rem;
   }
 }
