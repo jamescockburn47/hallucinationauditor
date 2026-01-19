@@ -1,13 +1,13 @@
 import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Scale, 
-  FileSearch, 
-  CheckCircle2, 
-  XCircle, 
-  AlertCircle, 
-  Plus, 
-  Trash2, 
+import {
+  Scale,
+  FileSearch,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Plus,
+  Trash2,
   Loader2,
   BookOpen,
   Sparkles,
@@ -17,7 +17,6 @@ import {
   MessageSquareQuote,
   Gavel,
   Search,
-  Shield,
   ShieldCheck
 } from 'lucide-react'
 import './App.css'
