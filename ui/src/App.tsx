@@ -893,6 +893,16 @@ function App() {
                     {selectedItem.result?.title && selectedItem.result.title !== selectedItem.caseName && (
                       <p className="official-title">{selectedItem.result.title}</p>
                     )}
+                    {selectedItem.result?.url && selectedItem.result?.caseFound && (
+                      <a
+                        href={selectedItem.result.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="source-link"
+                      >
+                        View on {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'} <ExternalLink size={14} />
+                      </a>
+                    )}
                   </div>
 
                   {/* Source Paragraph from Document */}

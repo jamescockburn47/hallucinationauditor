@@ -219,7 +219,18 @@ function cleanPartyName(text: string): string | undefined {
  */
 function extractCaseName(textBefore: string): string | undefined {
   // Look at the last 200 characters before the citation
-  const context = textBefore.slice(-200);
+  let context = textBefore.slice(-200);
+
+  // Important: Only look at text on the same "line" as the citation
+  // Split by numbered list markers (common in legal docs) and newlines
+  // This prevents grabbing case names from previous citations in a list
+  const lineBreakers = /(?:\n|\r|(?:\d{1,3})\.\s+|\[\d+\]\s*)/g;
+  const parts = context.split(lineBreakers);
+  if (parts.length > 1) {
+    // Take only the last segment (same line as citation)
+    context = parts[parts.length - 1];
+  }
+
   return extractCaseNameFromText(context);
 }
 
