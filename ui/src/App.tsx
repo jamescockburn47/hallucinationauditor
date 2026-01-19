@@ -17,7 +17,11 @@ import {
   Search,
   Plus,
   Eye,
-  EyeOff
+  EyeOff,
+  HelpCircle,
+  Shield,
+  Database,
+  FileCheck
 } from 'lucide-react'
 import './App.css'
 
@@ -518,94 +522,152 @@ function App() {
       </AnimatePresence>
 
       <main className="main-container">
-        {/* Upload View */}
+        {/* Upload View - Landing Page */}
         {view === 'upload' && (
           <motion.div
             className="upload-view"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            <div className="upload-hero">
-              <h2>Check Your Citations</h2>
-              <p>Upload a legal document to verify that cited cases exist and can be found on official databases.</p>
+            {/* Hero Section */}
+            <div className="landing-hero">
+              <h1>Citation Auditor</h1>
+              <p className="hero-subtitle">Verify legal citations against official databases</p>
+              <p className="hero-description">
+                Upload a legal document to check whether cited cases exist on BAILII and Find Case Law.
+                Identifies potential Type 1 hallucinations where AI has fabricated case names or citations.
+              </p>
             </div>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.txt,.html,.doc,.docx"
-              onChange={handleFileInput}
-              style={{ display: 'none' }}
-            />
-
-            <div
-              className={`upload-zone-large ${dragActive ? 'drag-active' : ''} ${uploadedFile ? 'has-file' : ''}`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-              onClick={() => !uploadedFile && fileInputRef.current?.click()}
-            >
-              {uploadedFile ? (
-                <div className="uploaded-file-display">
-                  <FileText size={40} />
-                  <div className="file-details">
-                    <span className="file-name">{uploadedFile.name}</span>
-                    <span className="file-size">{(uploadedFile.size / 1024).toFixed(1)} KB</span>
-                  </div>
-                  <button className="remove-file-btn" onClick={(e) => { e.stopPropagation(); clearFile(); }}>
-                    <X size={18} />
-                  </button>
+            {/* How It Works Section */}
+            <div className="how-it-works-section">
+              <h2>How It Works</h2>
+              <div className="steps-grid">
+                <div className="step-card">
+                  <div className="step-number">1</div>
+                  <div className="step-icon"><Shield size={24} /></div>
+                  <h3>Local Processing</h3>
+                  <p>Your document is processed entirely in your browser. The content never leaves your device - only citation strings are sent for verification.</p>
                 </div>
-              ) : (
-                <div className="upload-prompt-large">
-                  <Upload size={48} />
-                  <span className="upload-text">Drop your document here or click to browse</span>
-                  <span className="file-types">PDF, Word, TXT, HTML</span>
+                <div className="step-card">
+                  <div className="step-number">2</div>
+                  <div className="step-icon"><FileSearch size={24} /></div>
+                  <h3>Citation Extraction</h3>
+                  <p>We extract all legal citations (e.g., [2020] UKSC 15, [1990] 2 AC 605) and identify the case names from your document.</p>
+                </div>
+                <div className="step-card">
+                  <div className="step-number">3</div>
+                  <div className="step-icon"><Database size={24} /></div>
+                  <h3>Database Lookup</h3>
+                  <p>Each citation is checked against BAILII and Find Case Law. We verify the case exists and the name matches.</p>
+                </div>
+                <div className="step-card">
+                  <div className="step-number">4</div>
+                  <div className="step-icon"><FileCheck size={24} /></div>
+                  <h3>Manual Review</h3>
+                  <p>View the actual judgment text alongside your document to verify the legal propositions yourself.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Upload Section */}
+            <div className="upload-section">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.txt,.html,.doc,.docx"
+                onChange={handleFileInput}
+                style={{ display: 'none' }}
+              />
+
+              <div
+                className={`upload-zone-large ${dragActive ? 'drag-active' : ''} ${uploadedFile ? 'has-file' : ''}`}
+                onDragEnter={handleDrag}
+                onDragLeave={handleDrag}
+                onDragOver={handleDrag}
+                onDrop={handleDrop}
+                onClick={() => !uploadedFile && fileInputRef.current?.click()}
+              >
+                {uploadedFile ? (
+                  <div className="uploaded-file-display">
+                    <FileText size={40} />
+                    <div className="file-details">
+                      <span className="file-name">{uploadedFile.name}</span>
+                      <span className="file-size">{(uploadedFile.size / 1024).toFixed(1)} KB</span>
+                    </div>
+                    <button className="remove-file-btn" onClick={(e) => { e.stopPropagation(); clearFile(); }}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="upload-prompt-large">
+                    <Upload size={48} />
+                    <span className="upload-text">Drop your document here or click to browse</span>
+                    <span className="file-types">PDF, Word, TXT, HTML</span>
+                  </div>
+                )}
+              </div>
+
+              {uploadedFile && (
+                <button
+                  className="extract-btn-large"
+                  onClick={extractFromDocument}
+                  disabled={isExtracting}
+                >
+                  {isExtracting ? (
+                    <>
+                      <Loader2 size={20} className="spinning" />
+                      Extracting Citations...
+                    </>
+                  ) : (
+                    <>
+                      <FileSearch size={20} />
+                      Extract Citations
+                    </>
+                  )}
+                </button>
+              )}
+
+              {error && (
+                <div className="error-message">
+                  <AlertCircle size={18} />
+                  {error}
                 </div>
               )}
             </div>
 
-            {uploadedFile && (
-              <button
-                className="extract-btn-large"
-                onClick={extractFromDocument}
-                disabled={isExtracting}
-              >
-                {isExtracting ? (
-                  <>
-                    <Loader2 size={20} className="spinning" />
-                    Extracting Citations...
-                  </>
-                ) : (
-                  <>
-                    <FileSearch size={20} />
-                    Extract Citations
-                  </>
-                )}
-              </button>
-            )}
+            {/* What We Check Section */}
+            <div className="what-we-check">
+              <h2>What We Detect</h2>
+              <div className="detection-cards">
+                <div className="detection-card found">
+                  <CheckCircle2 size={20} />
+                  <div>
+                    <strong>Case Found</strong>
+                    <p>Citation exists in BAILII/FCL and case name matches</p>
+                  </div>
+                </div>
+                <div className="detection-card not-found">
+                  <XCircle size={20} />
+                  <div>
+                    <strong>Not Found (Type 1)</strong>
+                    <p>Citation cannot be found - may be fabricated</p>
+                  </div>
+                </div>
+                <div className="detection-card mismatch">
+                  <AlertCircle size={20} />
+                  <div>
+                    <strong>Name Mismatch (Type 2)</strong>
+                    <p>Citation exists but refers to a different case</p>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-            {error && (
-              <div className="error-message">
-                <AlertCircle size={18} />
-                {error}
-              </div>
-            )}
-
-            <div className="upload-info">
-              <div className="info-item">
-                <CheckCircle2 size={16} />
-                <span>Detects Type 1 hallucinations (fabricated cases)</span>
-              </div>
-              <div className="info-item">
-                <CheckCircle2 size={16} />
-                <span>Document parsed locally - never uploaded</span>
-              </div>
-              <div className="info-item">
-                <CheckCircle2 size={16} />
-                <span>Checks against BAILII & Find Case Law</span>
-              </div>
+            {/* Privacy Note */}
+            <div className="privacy-note">
+              <Shield size={16} />
+              <span>Your documents are processed locally and never stored on our servers</span>
             </div>
           </motion.div>
         )}
@@ -804,139 +866,181 @@ function App() {
               </div>
             )}
 
-            {/* Right Panel - Detail View */}
+            {/* Right Panel - Detail View with Split Layout */}
             <div className="detail-panel">
               {selectedItem ? (
-                <div className="detail-content">
-                  <div className="detail-header">
-                    <div className={`outcome-badge large ${selectedItem.result?.outcome || 'pending'}`}>
-                      {selectedItem.status === 'pending' && 'Pending'}
-                      {selectedItem.status === 'resolving' && 'Resolving...'}
-                      {selectedItem.status === 'verifying' && 'Processing...'}
-                      {selectedItem.status === 'done' && selectedItem.result?.outcome === 'verified' && 'Case Found'}
-                      {selectedItem.status === 'done' && selectedItem.result?.outcome === 'not_found' && 'Not Found'}
-                      {selectedItem.status === 'done' && selectedItem.result?.outcome === 'needs_review' && 'Needs Review'}
-                    </div>
-                  </div>
-
-                  <div className="detail-section">
-                    <h3>Case</h3>
-                    <p className="case-name-display">{selectedItem.caseName || 'Unknown Case Name'}</p>
-                    <p className="citation-display">{selectedItem.citation}</p>
-                    {selectedItem.result?.title && selectedItem.result.title !== selectedItem.caseName && (
-                      <p className="official-title">{selectedItem.result.title}</p>
-                    )}
-                    {selectedItem.result?.url && selectedItem.result?.caseFound && (
-                      <a
-                        href={selectedItem.result.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="source-link"
-                      >
-                        View on {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'} <ExternalLink size={14} />
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Source Paragraph from Document */}
-                  {selectedItem.sourceParagraph && (
-                    <div className="detail-section source-section">
-                      <h3>Source Paragraph <span className="para-badge">[{selectedItem.sourceParagraph.paragraphNumber}]</span></h3>
-                      <div className="source-paragraph">
-                        <p>{selectedItem.sourceParagraph.text}</p>
+                <div className="detail-content split-layout">
+                  {/* Left Column - Case Info & Source */}
+                  <div className="detail-left-column">
+                    <div className="detail-header">
+                      <div className={`outcome-badge large ${selectedItem.result?.outcome || 'pending'}`}>
+                        {selectedItem.status === 'pending' && 'Pending'}
+                        {selectedItem.status === 'resolving' && 'Resolving...'}
+                        {selectedItem.status === 'verifying' && 'Processing...'}
+                        {selectedItem.status === 'done' && selectedItem.result?.outcome === 'verified' && 'Case Found'}
+                        {selectedItem.status === 'done' && selectedItem.result?.outcome === 'not_found' && 'Not Found'}
+                        {selectedItem.status === 'done' && selectedItem.result?.outcome === 'needs_review' && 'Needs Review'}
+                      </div>
+                      <div className="tooltip-trigger">
+                        <HelpCircle size={14} />
+                        <div className="tooltip">
+                          <strong>Case Found:</strong> Citation exists in database<br/>
+                          <strong>Not Found:</strong> Potential fabricated case<br/>
+                          <strong>Review:</strong> Manual verification needed
+                        </div>
                       </div>
                     </div>
-                  )}
 
-                  {selectedItem.result?.caseFound === false && (
-                    <div className="warning-box">
-                      <AlertCircle size={18} />
-                      <div>
-                        <strong>Potential Type 1 Hallucination</strong>
-                        <p>This citation could not be found on BAILII or Find Case Law.
-                        The case may be fabricated, or may exist in a database we don't search.
-                        Please verify manually.</p>
-                      </div>
+                    <div className="detail-section case-info-compact">
+                      <h3>
+                        Case
+                        <span className="tooltip-trigger inline">
+                          <HelpCircle size={12} />
+                          <div className="tooltip">The case name and citation extracted from your document</div>
+                        </span>
+                      </h3>
+                      <p className="case-name-display">{selectedItem.caseName || 'Unknown Case Name'}</p>
+                      <p className="citation-display">{selectedItem.citation}</p>
+                      {selectedItem.result?.title && selectedItem.result.title !== selectedItem.caseName && (
+                        <p className="official-title">Official: {selectedItem.result.title}</p>
+                      )}
+                      {selectedItem.result?.url && selectedItem.result?.caseFound && (
+                        <a
+                          href={selectedItem.result.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="source-link"
+                        >
+                          View on {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'} <ExternalLink size={14} />
+                        </a>
+                      )}
                     </div>
-                  )}
 
-                  {/* Embedded Judgment Viewer with Search */}
-                  {selectedItem.result?.judgmentParagraphs && selectedItem.result.judgmentParagraphs.length > 0 && (
-                    <div className="detail-section judgment-viewer-section">
-                      <div className="judgment-header">
-                        <h3>Judgment Text</h3>
+                    {/* Source Paragraph - Compact */}
+                    {selectedItem.sourceParagraph && (
+                      <div className="detail-section source-section-compact">
+                        <h3>
+                          Your Document
+                          <span className="para-badge">[{selectedItem.sourceParagraph.paragraphNumber}]</span>
+                          <span className="tooltip-trigger inline">
+                            <HelpCircle size={12} />
+                            <div className="tooltip">The paragraph from your document where this citation appears</div>
+                          </span>
+                        </h3>
+                        <div className="source-paragraph-compact">
+                          <p>{selectedItem.sourceParagraph.text.length > 300
+                            ? selectedItem.sourceParagraph.text.slice(0, 300) + '...'
+                            : selectedItem.sourceParagraph.text}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedItem.result?.caseFound === false && (
+                      <div className="warning-box compact">
+                        <AlertCircle size={16} />
+                        <div>
+                          <strong>Potential Hallucination</strong>
+                          <p>This citation could not be found. The case may be fabricated or exist in a database we don't search.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column - Judgment Viewer */}
+                  <div className="detail-right-column">
+                    {selectedItem.result?.judgmentParagraphs && selectedItem.result.judgmentParagraphs.length > 0 ? (
+                      <div className="judgment-viewer-full">
+                        <div className="judgment-header">
+                          <h3>
+                            Judgment Text
+                            <span className="tooltip-trigger inline">
+                              <HelpCircle size={12} />
+                              <div className="tooltip">Full text from the official case database. Search to find relevant passages.</div>
+                            </span>
+                          </h3>
+                          {selectedItem.result?.url && (
+                            <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link-small">
+                              Open Full <ExternalLink size={12} />
+                            </a>
+                          )}
+                        </div>
+                        <div className="judgment-search">
+                          <Search size={14} />
+                          <input
+                            type="text"
+                            placeholder="Search judgment text..."
+                            value={judgmentSearch}
+                            onChange={(e) => setJudgmentSearch(e.target.value)}
+                          />
+                          {judgmentSearch && (
+                            <button className="clear-search" onClick={() => setJudgmentSearch('')}>
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+                        <div className="judgment-content-scrollable">
+                          {(() => {
+                            const searchLower = judgmentSearch.toLowerCase()
+
+                            const filteredParas = judgmentSearch
+                              ? selectedItem.result?.judgmentParagraphs?.filter(p =>
+                                  p.text.toLowerCase().includes(searchLower) ||
+                                  p.para_num.includes(judgmentSearch)
+                                )
+                              : selectedItem.result?.judgmentParagraphs
+
+                            if (!filteredParas || filteredParas.length === 0) {
+                              return <p className="no-results">No matching paragraphs found</p>
+                            }
+
+                            return filteredParas.map((para, idx) => {
+                              let displayText = para.text
+
+                              // Highlight search terms
+                              if (judgmentSearch) {
+                                const regex = new RegExp(`(${judgmentSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+                                displayText = para.text.replace(regex, '<mark>$1</mark>')
+                              }
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className="judgment-para"
+                                  id={`para-${para.para_num}`}
+                                >
+                                  <span className="para-num">[{para.para_num}]</span>
+                                  {para.speaker && <span className="para-speaker">{para.speaker}:</span>}
+                                  <p dangerouslySetInnerHTML={{ __html: displayText }} />
+                                </div>
+                              )
+                            })
+                          })()}
+                        </div>
+                      </div>
+                    ) : selectedItem.result?.caseFound ? (
+                      <div className="judgment-placeholder">
+                        <BookOpen size={32} />
+                        <p>Judgment text loading...</p>
                         {selectedItem.result?.url && (
-                          <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link-small">
-                            Open Full <ExternalLink size={12} />
+                          <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link">
+                            View on {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'} <ExternalLink size={14} />
                           </a>
                         )}
                       </div>
-                      <div className="judgment-search">
-                        <Search size={14} />
-                        <input
-                          type="text"
-                          placeholder="Search judgment..."
-                          value={judgmentSearch}
-                          onChange={(e) => setJudgmentSearch(e.target.value)}
-                        />
-                        {judgmentSearch && (
-                          <button className="clear-search" onClick={() => setJudgmentSearch('')}>
-                            <X size={12} />
-                          </button>
-                        )}
+                    ) : (
+                      <div className="judgment-placeholder not-found">
+                        <XCircle size={32} />
+                        <p>No judgment text available</p>
+                        <span className="placeholder-hint">This citation could not be found in our databases</span>
                       </div>
-                      <div className="judgment-content">
-                        {(() => {
-                          const searchLower = judgmentSearch.toLowerCase()
-
-                          const filteredParas = judgmentSearch
-                            ? selectedItem.result?.judgmentParagraphs?.filter(p =>
-                                p.text.toLowerCase().includes(searchLower) ||
-                                p.para_num.includes(judgmentSearch)
-                              )
-                            : selectedItem.result?.judgmentParagraphs
-
-                          if (!filteredParas || filteredParas.length === 0) {
-                            return <p className="no-results">No matching paragraphs found</p>
-                          }
-
-                          return filteredParas.map((para, idx) => {
-                            let displayText = para.text
-
-                            // Highlight search terms
-                            if (judgmentSearch) {
-                              const regex = new RegExp(`(${judgmentSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
-                              displayText = para.text.replace(regex, '<mark>$1</mark>')
-                            }
-
-                            return (
-                              <div
-                                key={idx}
-                                className="judgment-para"
-                                id={`para-${para.para_num}`}
-                              >
-                                <span className="para-num">[{para.para_num}]</span>
-                                {para.speaker && <span className="para-speaker">{para.speaker}:</span>}
-                                <p dangerouslySetInnerHTML={{ __html: displayText }} />
-                              </div>
-                            )
-                          })
-                        })()}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedItem.result?.notes && (
-                    <div className="detail-section notes-section">
-                      <h3>Notes</h3>
-                      <p className="notes-text">{selectedItem.result.notes}</p>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="detail-placeholder">
                   <BookOpen size={48} />
                   <p>Select a citation to view details</p>
+                  <span className="placeholder-hint">Click on any citation in the list to see case information and judgment text</span>
                 </div>
               )}
             </div>
