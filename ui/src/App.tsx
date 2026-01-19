@@ -538,6 +538,10 @@ function App() {
                 <p className="splash-tagline">Deterministic verification of legal citations</p>
               </div>
 
+              <div className="splash-motto">
+                <p>"AI is not perfect - always check your work"</p>
+              </div>
+
               <div className="splash-section">
                 <h2>What is this tool?</h2>
                 <p>
@@ -550,22 +554,30 @@ function App() {
               <div className="splash-section">
                 <h2>Why do citation hallucinations happen?</h2>
                 <p>
-                  Large Language Models (LLMs) like ChatGPT generate text by predicting likely word sequences,
-                  not by retrieving facts from a database. When asked for legal citations, they may produce
-                  text that <em>looks</em> like a valid citation but refers to a case that doesn't exist.
+                  LLMs sometimes retrieve accurate information, sometimes draw from unreliable sources,
+                  and sometimes invent content entirely. Hallucinations are more likely in <em>edge cases</em>:
+                  obscure topics, older cases, specific jurisdictions, or novel legal questions where
+                  training data is sparse or conflicting.
+                </p>
+                <p className="hallucination-note">
+                  <a href="https://naturalandartificiallaw.com/" target="_blank" rel="noopener noreferrer">Matthew Lee</a> has
+                  identified <strong>8 types of legal citation hallucinations</strong>, ranging from completely
+                  fabricated cases to subtle misstatements of ratio. This tool currently detects only <em>Type 1:
+                  Fabricated Case & Citation</em> - where the case simply does not exist. See the "How It Works"
+                  section in the main app for the full taxonomy.
                 </p>
                 <div className="hallucination-examples">
                   <div className="example-item">
-                    <strong>More likely in edge cases:</strong>
-                    <span>Obscure topics, older cases, specific jurisdictions, or novel legal questions</span>
+                    <strong>Type 1 - Pure invention:</strong>
+                    <span>A case name and citation that do not exist at all - this is what we check</span>
                   </div>
                   <div className="example-item">
-                    <strong>Plausible-sounding:</strong>
-                    <span>Generated citations often follow correct formatting but reference non-existent cases</span>
+                    <strong>Types 2-8 - Subtle errors:</strong>
+                    <span>Wrong citation for real case, misstated facts/ratio, conflated authorities, and more</span>
                   </div>
                   <div className="example-item">
                     <strong>Confidently presented:</strong>
-                    <span>LLMs present fabricated citations with the same confidence as real ones</span>
+                    <span>LLMs present all citations with equal confidence - fabricated or real</span>
                   </div>
                 </div>
               </div>
