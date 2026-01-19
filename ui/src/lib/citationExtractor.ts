@@ -140,7 +140,8 @@ export function extractCaseNameFromText(text: string): string | undefined {
 
 /**
  * Extract plaintiff/claimant name from text before "v".
- * Handles common introductory phrases and extracts the actual party name.
+ * STRICT: Only extract when we have a clear party name pattern.
+ * Avoids grabbing surrounding context text.
  */
 function extractPlaintiffName(text: string): string | undefined {
   if (!text || text.trim().length === 0) {
@@ -149,32 +150,35 @@ function extractPlaintiffName(text: string): string | undefined {
 
   let cleaned = text.trim();
 
-  // Split by common delimiters (semicolons, colons, sentence boundaries)
-  // and take the last segment which should contain the case name
-  const segments = cleaned.split(/[;:]|\.\s+(?=[A-Z])/);
-  cleaned = segments[segments.length - 1].trim();
+  // Only look at the last 80 characters - case names should be close to "v"
+  if (cleaned.length > 80) {
+    cleaned = cleaned.slice(-80);
+  }
 
-  // Remove common introductory phrases
-  // These appear frequently before case citations in legal writing
-  const introPatterns = [
-    /^.*?\b(?:as\s+(?:stated|held|noted|decided|established|confirmed|affirmed)\s+(?:in|by))\s+/i,
-    /^.*?\b(?:following|per|see\s+also|see|cf\.?|compare)\s+/i,
-    /^.*?\b(?:in|the\s+case\s+of|the\s+decision\s+in)\s+/i,
-    /^.*?\b(?:citing|quoted\s+in|applied\s+in|approved\s+in|overruled\s+in)\s+/i,
-  ];
+  // Look for the LAST capital-letter word/phrase before the end
+  // This should be the plaintiff/claimant name
+  // Pattern: Capitalized word(s) possibly including plc, Ltd, Inc, etc.
+  const partyNamePattern = /([A-Z][A-Za-z'']+(?:\s+(?:[A-Z][A-Za-z'']+|plc|Ltd|Inc|LLP|Co|Corporation|Council|Authority|Secretary|State|Minister|Commissioner|Trust|Board|NHS|BBC|CPS))*)\s*$/;
 
-  for (const pattern of introPatterns) {
-    const match = cleaned.match(pattern);
-    if (match) {
-      cleaned = cleaned.slice(match[0].length).trim();
-      break;
+  const match = cleaned.match(partyNamePattern);
+  if (match) {
+    const name = match[1].trim();
+    // Validate: reasonable length, not just single letter, not common words
+    if (name.length >= 2 && name.length <= 80) {
+      // Exclude common words that aren't party names
+      const excludeWords = ['The', 'In', 'And', 'For', 'With', 'From', 'That', 'This', 'Which', 'Where', 'When', 'What', 'How', 'Why'];
+      if (!excludeWords.includes(name)) {
+        return name;
+      }
     }
   }
 
-  // Remove any remaining leading lowercase text before a capital letter
-  cleaned = cleaned.replace(/^[a-z][a-z\s,]*(?=[A-Z])/g, '');
+  // Also check for "R" (Crown prosecution)
+  if (cleaned.trim().endsWith('R') || cleaned.match(/\bR\s*$/)) {
+    return 'R';
+  }
 
-  return cleanPartyName(cleaned);
+  return undefined;
 }
 
 /**
