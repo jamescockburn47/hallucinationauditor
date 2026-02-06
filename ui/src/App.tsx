@@ -27,7 +27,7 @@ import './App.css'
 import { extractTextFromFile } from './lib/documentParser'
 import { extractCitationsWithContext } from './lib/citationExtractor'
 import { isNeutralCitation, constructUrls, constructFclHtmlUrl } from './lib/citationResolver'
-import { resolveCitations, checkUrlsExist } from './lib/api'
+import { resolveCitations, checkUrlsExist, tryBailiiCitationFinder } from './lib/api'
 
 interface SourceParagraph {
   paragraphNumber: number
@@ -365,41 +365,72 @@ function App() {
         })
       }
 
-      // --- Step 2.5: Retry unfound neutral citations via server search ---
-      // Direct URL construction sometimes misses cases that BAILII stores
-      // at different paths. The server uses BAILII citation finder, BAILII
-      // search, and FCL Atom search to find cases by other methods.
-      const unfoundNeutral: Array<{ citation: string; case_name?: string | null }> = []
+      // --- Step 2.5: Retry unfound citations via BAILII citation finder ---
+      // Try browser-direct BAILII citation finder first (no server needed if CORS works).
+      // Then fall back to server search for anything still not found.
+      const unfoundCitations: Array<{ key: string; citation: string; case_name?: string | null }> = []
       for (const [key, ctx] of neutralCitations) {
         const result = resolvedMap.get(key)
         if (!result || result.source_type === 'not_found') {
-          unfoundNeutral.push({ citation: ctx.citation, case_name: ctx.case_name })
+          unfoundCitations.push({ key, citation: ctx.citation, case_name: ctx.case_name || undefined })
         }
       }
 
-      if (unfoundNeutral.length > 0) {
+      if (unfoundCitations.length > 0) {
         setAuditProgress({
           current: 0,
           total,
-          phase: `Deep searching ${unfoundNeutral.length} unfound citation(s) via BAILII/FCL search...`
+          phase: `Deep searching ${unfoundCitations.length} unfound citation(s) via BAILII lookup...`
         })
 
-        try {
-          const retryResponse = await resolveCitations(unfoundNeutral, webSearchEnabled)
+        // Step 2.5a: Try BAILII citation finder directly from browser (parallel)
+        const citFinderResults = await Promise.all(
+          unfoundCitations.map(c => tryBailiiCitationFinder(c.citation))
+        )
 
-          retryResponse.resolved.forEach(r => {
-            if (r.source_type !== 'not_found') {
-              resolvedMap.set(r.citation.toLowerCase(), {
-                source_type: r.source_type,
-                url: r.url,
-                title: r.title,
-                case_name: r.case_name,
-                error: undefined,
-              })
-            }
+        const stillUnfound: Array<{ citation: string; case_name?: string | null }> = []
+
+        for (let i = 0; i < unfoundCitations.length; i++) {
+          const { key, citation, case_name } = unfoundCitations[i]
+          const found = citFinderResults[i]
+
+          if (found) {
+            resolvedMap.set(key, {
+              source_type: 'bailii',
+              url: found.url,
+              title: found.title,
+              case_name: case_name || found.title || null,
+            })
+          } else {
+            stillUnfound.push({ citation, case_name })
+          }
+        }
+
+        // Step 2.5b: Server fallback for anything BAILII citation finder didn't resolve
+        if (stillUnfound.length > 0) {
+          setAuditProgress({
+            current: 0,
+            total,
+            phase: `Server search for ${stillUnfound.length} remaining citation(s)...`
           })
-        } catch (e) {
-          console.warn('Retry search failed:', e)
+
+          try {
+            const retryResponse = await resolveCitations(stillUnfound, webSearchEnabled)
+
+            retryResponse.resolved.forEach(r => {
+              if (r.source_type !== 'not_found') {
+                resolvedMap.set(r.citation.toLowerCase(), {
+                  source_type: r.source_type,
+                  url: r.url,
+                  title: r.title,
+                  case_name: r.case_name,
+                  error: undefined,
+                })
+              }
+            })
+          } catch (e) {
+            console.warn('Server search fallback failed:', e)
+          }
         }
       }
 

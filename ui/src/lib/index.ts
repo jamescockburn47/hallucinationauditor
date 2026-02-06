@@ -24,5 +24,6 @@ export {
   checkUrlsExist,
   checkHealth,
   type ResolvedCitation,
-  type CitationResolveResponse
+  type CitationResolveResponse,
+  type UrlCheckResult,
 } from './api';

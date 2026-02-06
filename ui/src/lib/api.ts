@@ -1,21 +1,14 @@
 /**
  * API client for the Citation Auditor
  *
- * PRIVACY ARCHITECTURE:
- * - Document parsing happens in the browser (documentParser.ts)
- * - Citation extraction happens in the browser (citationExtractor.ts)
- * - Citation URL construction happens in the browser (citationResolver.ts)
- * - Judgment parsing happens in the browser (judgmentParser.ts)
- *
- * This API client only sends:
- * 1. Public URLs to proxy-fetch (BAILII/FCL URLs for judgment retrieval)
- * 2. Citation strings for search (when neutral citation URL construction fails)
+ * BROWSER-FIRST ARCHITECTURE:
+ * All requests to BAILII/FCL are attempted directly from the user's browser.
+ * This distributes rate limits across users (each user = their own IP).
+ * Only if CORS blocks the request does the server proxy get used as fallback.
  *
  * NO document content ever leaves the browser.
  */
 
-// In production (when served from same origin), use empty string for relative URLs
-// In development, use localhost:8000
 const isLocalhost = typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
@@ -52,14 +45,159 @@ export interface CitationWithContext {
   claim_text?: string | null;
 }
 
+export interface UrlCheckResult {
+  url: string;
+  exists: boolean;
+  status_code: number;
+  title?: string | null;
+}
+
+// ===== BROWSER-DIRECT FUNCTIONS =====
+
+// Legal content indicators for validating real judgment pages
+const LEGAL_INDICATORS = [
+  'judgment', 'court', 'justice', 'appeal', 'claimant',
+  'defendant', 'respondent', 'appellant', 'held', 'ordered',
+  'lordship', 'honour', 'tribunal', 'act',
+];
+
 /**
- * Proxy-fetch a public URL through the server (CORS proxy).
+ * Check if fetched HTML/XML content is a real judgment (not a stub/404 page).
+ */
+function isRealJudgmentContent(content: string, url: string): boolean {
+  if (!content || content.length < 2000) return false;
+
+  const lower = content.toLowerCase();
+
+  // Check for error pages
+  if (lower.slice(0, 1000).includes('page not found')) return false;
+  if (lower.slice(0, 1000).includes('error 404')) return false;
+
+  // BAILII stub pages are ~1654 bytes
+  if (url.includes('bailii.org') && content.length < 3000) return false;
+
+  // FCL XML: must have Akoma Ntoso structure
+  if (url.endsWith('.xml')) {
+    return lower.includes('<akomantoso') || lower.includes('<frbrwork');
+  }
+
+  // FCL HTML: check for real content
+  if (url.includes('caselaw.nationalarchives.gov.uk')) {
+    if (content.length < 5000) return false;
+    if (lower.slice(0, 2000).includes('page not found')) return false;
+    return true;
+  }
+
+  // BAILII HTML: check for legal content indicators
+  const matches = LEGAL_INDICATORS.filter(ind => lower.includes(ind));
+  return matches.length >= 3;
+}
+
+/**
+ * Extract title from HTML/XML content.
+ */
+function extractTitleFromContent(content: string): string | null {
+  // Try HTML <title> tag
+  const titleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch) {
+    let title = titleMatch[1].trim().slice(0, 200);
+    if (title.startsWith('BAILII - ')) title = title.slice(9);
+    return title || null;
+  }
+
+  // Try FCL FRBRname
+  const nameMatch = content.match(/<FRBRname\s+value="([^"]+)"/);
+  if (nameMatch) return nameMatch[1].trim().slice(0, 200);
+
+  return null;
+}
+
+/**
+ * Try to fetch and validate a single URL directly from the browser.
+ * Returns result if successful, null if CORS blocked.
+ */
+async function tryDirectCheck(url: string): Promise<UrlCheckResult | null> {
+  try {
+    const response = await fetch(url, {
+      mode: 'cors',
+      headers: { 'Accept': 'text/html, application/xml, text/xml, */*' },
+    });
+
+    if (!response.ok) {
+      return { url, exists: false, status_code: response.status };
+    }
+
+    const content = await response.text();
+    const exists = isRealJudgmentContent(content, url);
+    const title = exists ? extractTitleFromContent(content) : null;
+
+    return { url, exists, status_code: exists ? 200 : 404, title };
+  } catch {
+    // CORS blocked or network error - return null to signal fallback needed
+    return null;
+  }
+}
+
+/**
+ * Check if URLs exist - tries direct browser fetch first, falls back to server.
  *
- * Only BAILII and FCL URLs are allowed. The server does not process
- * the content - it just forwards the HTTP response.
+ * BROWSER-FIRST: Each URL is first fetched directly from the user's browser.
+ * This means BAILII/FCL see the user's IP, not the server's IP, distributing
+ * rate limits naturally across all users.
  *
- * @param url - Public BAILII or FCL URL to fetch
- * @returns The fetched content and metadata
+ * Only URLs that fail due to CORS get sent to the server proxy as fallback.
+ */
+export async function checkUrlsExist(urls: string[]): Promise<UrlCheckResult[]> {
+  // Step 1: Try all URLs directly from the browser (parallel)
+  const directResults = await Promise.all(
+    urls.map(url => tryDirectCheck(url))
+  );
+
+  const results: UrlCheckResult[] = [];
+  const needProxy: string[] = [];
+
+  for (let i = 0; i < urls.length; i++) {
+    if (directResults[i] !== null) {
+      // Direct fetch worked (CORS allowed) - use browser result
+      results.push(directResults[i]!);
+    } else {
+      // CORS blocked - need server proxy fallback
+      needProxy.push(urls[i]);
+    }
+  }
+
+  // Step 2: For CORS-blocked URLs, fall back to server proxy
+  if (needProxy.length > 0) {
+    try {
+      const response = await fetch(`${API_BASE}/api/check-urls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: needProxy }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        results.push(...data.results);
+      } else {
+        // Server proxy also failed - mark all as unknown
+        for (const url of needProxy) {
+          results.push({ url, exists: false, status_code: 0 });
+        }
+      }
+    } catch {
+      for (const url of needProxy) {
+        results.push({ url, exists: false, status_code: 0 });
+      }
+    }
+  }
+
+  return results;
+}
+
+// ===== SERVER PROXY FUNCTIONS (fallback only) =====
+
+/**
+ * Proxy-fetch a URL through the server (CORS fallback).
  */
 export async function proxyFetch(url: string): Promise<{
   content: string;
@@ -74,72 +212,50 @@ export async function proxyFetch(url: string): Promise<{
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Proxy fetch failed: ${error}`);
+    throw new Error(`Proxy fetch failed: ${await response.text()}`);
   }
 
   return response.json();
 }
 
 /**
- * Try to fetch a URL directly from the browser (no proxy needed).
- * This will fail for BAILII due to CORS, but may work for FCL.
+ * Try BAILII citation finder directly from the browser.
+ * POST to /cgi-bin/find_by_citation.cgi - if case exists, BAILII redirects
+ * to the case page. We can read the response if CORS allows it.
  *
- * @param url - URL to try fetching directly
- * @returns Content string if successful, null if CORS blocked
+ * Returns the case URL and title if found, null if CORS blocked or not found.
  */
-export async function tryDirectFetch(url: string): Promise<string | null> {
+export async function tryBailiiCitationFinder(citation: string): Promise<{url: string; title: string | null} | null> {
   try {
-    const response = await fetch(url, {
+    const response = await fetch('https://www.bailii.org/cgi-bin/find_by_citation.cgi', {
+      method: 'POST',
       mode: 'cors',
-      headers: { 'Accept': 'text/html, application/xml, text/xml' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `citation=${encodeURIComponent(citation)}`,
+      redirect: 'follow',
     });
 
-    if (response.ok) {
-      return await response.text();
-    }
-    return null;
+    if (!response.ok) return null;
+
+    const content = await response.text();
+
+    // Check if we got redirected to a real case page (not the search form)
+    if (response.url.includes('/cgi-bin/')) return null;
+    if (!isRealJudgmentContent(content, response.url)) return null;
+
+    const title = extractTitleFromContent(content);
+    return { url: response.url, title };
   } catch {
-    // CORS error or network error - expected for BAILII
+    // CORS blocked - expected
     return null;
   }
 }
 
 /**
- * Fetch judgment content for a URL, trying direct fetch first,
- * then falling back to the proxy.
+ * Resolve citations - tries browser-direct BAILII lookup first,
+ * falls back to server search.
  *
- * This maximizes privacy: if the browser can fetch directly from
- * BAILII/FCL, no data goes through our server at all.
- *
- * @param url - BAILII or FCL URL
- * @returns Judgment content string
- */
-export async function fetchJudgmentContent(url: string): Promise<string | null> {
-  // Try direct fetch first (works for FCL if they support CORS)
-  const directContent = await tryDirectFetch(url);
-  if (directContent && directContent.length > 500) {
-    return directContent;
-  }
-
-  // Fall back to proxy
-  try {
-    const proxyResult = await proxyFetch(url);
-    if (proxyResult.ok && proxyResult.content) {
-      return proxyResult.content;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Resolve citations to URLs and fetch judgment paragraphs.
- * Uses the legacy endpoint for backward compatibility.
- *
- * PRIVACY: Only citation strings and case names are sent to the server.
- * No document content leaves the browser.
+ * Only citation strings are sent - no document content.
  */
 export async function resolveCitations(
   citations: string[] | CitationWithContext[],
@@ -164,38 +280,10 @@ export async function resolveCitations(
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to resolve citations: ${error}`);
+    throw new Error(`Failed to resolve citations: ${await response.text()}`);
   }
 
   return response.json();
-}
-
-/**
- * Batch check if URLs exist (lightweight HEAD requests).
- * 
- * The browser constructs BAILII/FCL URLs client-side, then sends
- * them to this endpoint just to check existence (200 vs 404).
- * Minimal server traffic - no judgment content is fetched.
- */
-export async function checkUrlsExist(urls: string[]): Promise<Array<{
-  url: string;
-  exists: boolean;
-  status_code: number;
-  title?: string | null;
-}>> {
-  const response = await fetch(`${API_BASE}/api/check-urls`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ urls }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`URL check failed: ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  return data.results;
 }
 
 /**
