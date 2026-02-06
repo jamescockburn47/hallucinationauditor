@@ -369,38 +369,76 @@ export interface CitationWithContext extends ExtractedCitation {
 }
 
 /**
- * Extract all citations from text with their source paragraphs
- * Each citation is returned separately with the paragraph where it was found
+ * Extract all citations from text with their source paragraphs.
+ * 
+ * IMPORTANT: Runs extraction on the FULL text first (no truncation),
+ * then maps each citation back to its surrounding paragraph for context.
+ * This ensures no citations are missed due to paragraph splitting.
  */
 export function extractCitationsWithContext(text: string): CitationWithContext[] {
+  // Step 1: Extract ALL citations from the full text (no paragraph splitting)
+  const allCitations = extractCitations(text);
+
+  if (allCitations.length === 0) return [];
+
+  // Step 2: Build paragraph map for context (best-effort, doesn't affect extraction)
+  const paragraphs = splitIntoParagraphs(text);
+
+  // Step 3: For each extracted citation, find its position in the full text
+  //         and map it to the nearest paragraph for context display
   const results: CitationWithContext[] = [];
   const seen = new Set<string>();
 
-  // Split into paragraphs
-  const paragraphs = splitIntoParagraphs(text);
+  for (const cit of allCitations) {
+    const key = cit.raw.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
 
-  for (const para of paragraphs) {
-    // Find all citations in this paragraph
-    const citations = extractCitations(para.text);
+    // Find the citation's position in the full text
+    const citPos = text.indexOf(cit.raw);
 
-    for (const cit of citations) {
-      const key = cit.raw.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
+    // Find which paragraph contains this position
+    let bestPara: { number: number; text: string } | null = null;
 
-      // Find the position of this citation in the paragraph
-      const citationMatch = para.text.indexOf(cit.raw);
-      const citationPosition = citationMatch >= 0 ? citationMatch : 0;
+    if (paragraphs.length > 0 && citPos >= 0) {
+      // Track cumulative position through paragraphs to find the right one
+      let searchPos = 0;
+      for (const para of paragraphs) {
+        const paraStart = text.indexOf(para.text, searchPos);
+        if (paraStart < 0) continue;
+        const paraEnd = paraStart + para.text.length;
 
-      results.push({
-        ...cit,
-        sourceParagraph: {
-          paragraphNumber: para.number,
-          text: para.text.trim(),
-          citationPosition
+        if (citPos >= paraStart && citPos < paraEnd) {
+          bestPara = para;
+          break;
         }
-      });
+        searchPos = paraStart + 1;
+      }
     }
+
+    // Fallback: extract surrounding context directly from the full text
+    if (!bestPara && citPos >= 0) {
+      // Get ~500 chars around the citation as context
+      const contextStart = text.lastIndexOf('\n', Math.max(0, citPos - 300));
+      const contextEnd = text.indexOf('\n', Math.min(text.length, citPos + cit.raw.length + 300));
+      const contextText = text.slice(
+        contextStart >= 0 ? contextStart : Math.max(0, citPos - 300),
+        contextEnd >= 0 ? contextEnd : Math.min(text.length, citPos + cit.raw.length + 300)
+      ).trim();
+
+      bestPara = { number: 0, text: contextText };
+    }
+
+    const citationPosition = bestPara ? bestPara.text.indexOf(cit.raw) : 0;
+
+    results.push({
+      ...cit,
+      sourceParagraph: bestPara ? {
+        paragraphNumber: bestPara.number,
+        text: bestPara.text,
+        citationPosition: citationPosition >= 0 ? citationPosition : 0,
+      } : undefined,
+    });
   }
 
   return results;
@@ -414,9 +452,10 @@ function splitIntoParagraphs(text: string): Array<{ number: number; text: string
 
   // Try to detect numbered paragraphs first (common in legal docs)
   // Pattern: "1." or "(1)" or "[1]" at start of line
-  const numberedPattern = /(?:^|\n\n?)(\d{1,3})\.\s+/g;
-  const bracketPattern = /(?:^|\n\n?)\[(\d{1,3})\]\s*/g;
-  const parenPattern = /(?:^|\n\n?)\((\d{1,3})\)\s+/g;
+  // Allow up to 5 digits for long documents (e.g. para 10000+)
+  const numberedPattern = /(?:^|\n\n?)(\d{1,5})\.\s+/g;
+  const bracketPattern = /(?:^|\n\n?)\[(\d{1,5})\]\s*/g;
+  const parenPattern = /(?:^|\n\n?)\((\d{1,5})\)\s+/g;
 
   // Check which pattern is most common
   const numberedMatches = [...text.matchAll(numberedPattern)];
