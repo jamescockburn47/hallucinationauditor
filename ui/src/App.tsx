@@ -27,7 +27,7 @@ import './App.css'
 import { extractTextFromFile } from './lib/documentParser'
 import { extractCitationsWithContext } from './lib/citationExtractor'
 import { isNeutralCitation, constructUrls } from './lib/citationResolver'
-import { resolveCitations, checkUrlsExist } from './lib/api'
+import { resolveCitations } from './lib/api'
 
 interface SourceParagraph {
   paragraphNumber: number
@@ -207,7 +207,17 @@ function App() {
     }
   }
 
-  // Run the audit - BAILII-first, all citations, no limits
+  // Run the audit
+  //
+  // NEUTRAL CITATIONS (e.g. [2015] UKSC 11):
+  //   URL constructed client-side → BAILII link assigned directly → NO server call.
+  //   The iframe loads BAILII from the user's browser. The user sees the judgment
+  //   (case exists) or BAILII's stub page (case doesn't exist). Zero server traffic.
+  //
+  // TRADITIONAL CITATIONS (e.g. [1990] 2 AC 605):
+  //   Can't construct a direct URL → server searches BAILII citation finder,
+  //   BAILII search, and FCL. Only citation strings are sent.
+  //
   const runAudit = async () => {
     if (extractedCitations.length === 0) return
 
@@ -215,154 +225,120 @@ function App() {
     setError(null)
 
     const total = extractedCitations.length
-    setAuditProgress({ current: 0, total, phase: 'Preparing...' })
 
-    // Reset all statuses
-    setExtractedCitations(prev => prev.map(c => ({ ...c, status: 'pending' as const, result: undefined })))
+    // Reset all
+    setExtractedCitations(prev => prev.map(c => ({ ...c, status: 'resolving' as const, result: undefined })))
 
     try {
-      // Deduplicate citations
-      type CitationCtx = { citation: string; case_name?: string | null }
-      const allUnique: Map<string, CitationCtx> = new Map()
+      const updatedCitations = [...extractedCitations]
 
-      extractedCitations.forEach(item => {
-        const key = item.citation.toLowerCase()
-        if (!allUnique.has(key)) {
-          allUnique.set(key, { citation: item.citation, case_name: item.caseName })
-        }
-      })
+      // Separate neutral vs traditional
+      const traditionalToResolve: Array<{ idx: number; citation: string; case_name?: string | null }> = []
 
-      // Mark all as resolving
-      setExtractedCitations(prev => prev.map(c => ({ ...c, status: 'resolving' as const })))
+      // --- Neutral citations: construct BAILII URL client-side, no server ---
+      for (let i = 0; i < updatedCitations.length; i++) {
+        const item = updatedCitations[i]
 
-      // Results map
-      const resolvedMap = new Map<string, {
-        source_type: string; url: string | null; title: string | null;
-        case_name: string | null; error?: string
-      }>()
-
-      // --- Step 1: Construct BAILII URLs for neutral citations, batch-check ---
-      const neutralKeys: string[] = []
-      const bailiiUrls: string[] = []
-      const urlToKey = new Map<string, string>()
-
-      for (const [key, ctx] of allUnique) {
-        if (isNeutralCitation(ctx.citation)) {
-          neutralKeys.push(key)
-          const urls = constructUrls(ctx.citation)
-          // BAILII URL is always first (preferred)
+        if (isNeutralCitation(item.citation)) {
+          const urls = constructUrls(item.citation)
           const bailiiUrl = urls.find(u => u.source === 'bailii')
+
           if (bailiiUrl) {
-            bailiiUrls.push(bailiiUrl.url)
-            urlToKey.set(bailiiUrl.url, key)
+            // Assign BAILII URL directly - iframe will load from user's browser
+            updatedCitations[i] = {
+              ...item,
+              status: 'done',
+              result: {
+                outcome: 'verified',
+                caseFound: true,
+                sourceType: 'bailii',
+                url: bailiiUrl.url,
+                notes: 'BAILII link constructed - verify in judgment viewer',
+              }
+            }
+          } else {
+            // Neutral but no BAILII pattern (shouldn't happen) - treat as traditional
+            traditionalToResolve.push({ idx: i, citation: item.citation, case_name: item.caseName || undefined })
           }
+        } else {
+          // Traditional citation - needs server search
+          traditionalToResolve.push({ idx: i, citation: item.citation, case_name: item.caseName || undefined })
         }
       }
 
-      if (bailiiUrls.length > 0) {
-        setAuditProgress({ current: 0, total, phase: `Checking ${bailiiUrls.length} citations on BAILII...` })
+      // Update UI with neutral results immediately
+      setExtractedCitations([...updatedCitations])
 
-        const checkResults = await checkUrlsExist(bailiiUrls)
-
-        for (const result of checkResults) {
-          const key = urlToKey.get(result.url)
-          if (!key) continue
-
-          if (result.exists) {
-            resolvedMap.set(key, {
-              source_type: 'bailii',
-              url: result.url,
-              title: result.title || null,
-              case_name: allUnique.get(key)?.case_name || result.title || null,
-            })
-          }
-        }
-      }
-
-      // --- Step 2: Send ALL unfound citations to server for deep search ---
-      // This covers: neutral citations not on BAILII, traditional citations,
-      // and uses BAILII citation finder + BAILII search + FCL search
-      const unfound: CitationCtx[] = []
-      for (const [key, ctx] of allUnique) {
-        if (!resolvedMap.has(key) || resolvedMap.get(key)?.source_type === 'not_found') {
-          unfound.push(ctx)
-        }
-      }
-
-      if (unfound.length > 0) {
+      // --- Traditional citations: server search (BAILII citation finder + search + FCL) ---
+      if (traditionalToResolve.length > 0) {
         setAuditProgress({
-          current: bailiiUrls.length,
+          current: total - traditionalToResolve.length,
           total,
-          phase: `Searching BAILII/FCL for ${unfound.length} remaining citation(s)...`
+          phase: `Searching BAILII/FCL for ${traditionalToResolve.length} traditional citation(s)...`
         })
 
         try {
-          const searchResponse = await resolveCitations(unfound, webSearchEnabled)
+          const citationsToSearch = traditionalToResolve.map(t => ({
+            citation: t.citation,
+            case_name: t.case_name,
+          }))
 
+          const searchResponse = await resolveCitations(citationsToSearch, webSearchEnabled)
+
+          // Map results back
+          const resultMap = new Map<string, typeof searchResponse.resolved[0]>()
           searchResponse.resolved.forEach(r => {
-            const key = r.citation.toLowerCase()
-            if (r.source_type !== 'not_found') {
-              resolvedMap.set(key, {
-                source_type: r.source_type,
-                url: r.url,
-                title: r.title,
-                case_name: r.case_name,
-              })
+            resultMap.set(r.citation.toLowerCase(), r)
+          })
+
+          for (const { idx, citation, case_name } of traditionalToResolve) {
+            const resolved = resultMap.get(citation.toLowerCase())
+
+            if (resolved && resolved.source_type !== 'not_found') {
+              const displayName = case_name || resolved.title || resolved.case_name || null
+              updatedCitations[idx] = {
+                ...updatedCitations[idx],
+                caseName: displayName,
+                status: 'done',
+                result: {
+                  outcome: 'verified',
+                  caseFound: true,
+                  sourceType: resolved.source_type,
+                  url: resolved.url || undefined,
+                  title: resolved.title || undefined,
+                  notes: `Found on ${resolved.source_type === 'fcl' ? 'Find Case Law' : 'BAILII'}`,
+                }
+              }
             } else {
-              // Only set not_found if we don't already have a result
-              if (!resolvedMap.has(key)) {
-                resolvedMap.set(key, {
-                  source_type: 'not_found',
-                  url: null,
-                  title: null,
-                  case_name: r.case_name,
-                  error: r.error || 'Not found on BAILII or Find Case Law',
-                })
+              updatedCitations[idx] = {
+                ...updatedCitations[idx],
+                status: 'done',
+                result: {
+                  outcome: 'not_found',
+                  caseFound: false,
+                  notes: resolved?.error || 'Not found on BAILII or Find Case Law'
+                }
               }
             }
-          })
+          }
         } catch (e) {
           console.warn('Server search failed:', e)
-        }
-      }
-
-      // --- Step 3: Map results to all citations ---
-      setAuditProgress({ current: 0, total, phase: 'Finalising...' })
-      const updatedCitations = [...extractedCitations]
-
-      for (let i = 0; i < updatedCitations.length; i++) {
-        const item = updatedCitations[i]
-        const resolved = resolvedMap.get(item.citation.toLowerCase())
-
-        if (resolved && resolved.source_type !== 'not_found') {
-          const displayName = item.caseName || resolved.title || resolved.case_name || null
-          updatedCitations[i] = {
-            ...item,
-            caseName: displayName,
-            status: 'done',
-            result: {
-              outcome: 'verified',
-              caseFound: true,
-              sourceType: resolved.source_type,
-              url: resolved.url || undefined,
-              title: resolved.title || undefined,
-              notes: `Found on ${resolved.source_type === 'fcl' ? 'Find Case Law' : 'BAILII'}`,
-            }
-          }
-        } else {
-          updatedCitations[i] = {
-            ...item,
-            status: 'done',
-            result: {
-              outcome: 'not_found',
-              caseFound: false,
-              notes: resolved?.error || 'Not found on BAILII or Find Case Law'
+          // Mark all traditional as error
+          for (const { idx } of traditionalToResolve) {
+            updatedCitations[idx] = {
+              ...updatedCitations[idx],
+              status: 'done',
+              result: {
+                outcome: 'not_found',
+                caseFound: false,
+                notes: 'Server search unavailable'
+              }
             }
           }
         }
       }
 
-      setExtractedCitations(updatedCitations)
+      setExtractedCitations([...updatedCitations])
       setAuditProgress({ current: total, total, phase: 'Complete' })
 
     } catch (err) {

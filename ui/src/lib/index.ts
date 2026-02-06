@@ -20,8 +20,6 @@ export * from './verifier';
 
 export {
   resolveCitations,
-  proxyFetch,
-  checkUrlsExist,
   checkHealth,
   type ResolvedCitation,
   type CitationResolveResponse,
