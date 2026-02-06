@@ -12,39 +12,89 @@ export interface ExtractedCitation {
   caseName?: string;     // Extracted case name if present
 }
 
-// Neutral citation patterns (e.g., [2015] UKSC 11)
+// Neutral citation patterns - comprehensive UK courts coverage
 const NEUTRAL_CITATION_PATTERNS = [
   // Supreme Court & Privy Council
   /\[(\d{4})\]\s+(UKSC|UKPC)\s+(\d+)/gi,
   // House of Lords (pre-2009)
   /\[(\d{4})\]\s+(UKHL)\s+(\d+)/gi,
-  // Court of Appeal
+  // Court of Appeal (Civil & Criminal)
   /\[(\d{4})\]\s+(EWCA)\s+(Civ|Crim)\s+(\d+)/gi,
-  // High Court
-  /\[(\d{4})\]\s+(EWHC)\s+(\d+)\s*\((Admin|Ch|QB|Fam|Comm|TCC|Pat|IPEC)\)/gi,
-  /\[(\d{4})\]\s+(EWHC)\s+(\d+)/gi,
-  // Upper Tribunal
-  /\[(\d{4})\]\s+(UKUT)\s+(\d+)\s*\((AAC|IAC|LC|TCC)\)/gi,
-  // Employment Appeal Tribunal
+  // High Court - all divisions with bracket suffix
+  /\[(\d{4})\]\s+(EWHC)\s+(\d+)\s*\((Admin|Ch|QB|KB|Fam|Comm|TCC|Pat|IPEC|Mercantile|Costs|SCCO|Admlty)\)/gi,
+  // High Court - bare (no division specified)
+  /\[(\d{4})\]\s+(EWHC)\s+(\d+)(?!\s*\()/gi,
+  // Upper Tribunal - all chambers
+  /\[(\d{4})\]\s+(UKUT)\s+(\d+)\s*\((AAC|IAC|LC|TCC|GRC)\)/gi,
+  // First-tier Tribunal - all chambers
+  /\[(\d{4})\]\s+(UKFTT)\s+(\d+)\s*\((TC|GRC|HESC|SEC|IAC|PC|ASNSC|WP)\)/gi,
+  // Employment Appeal Tribunal (both formats)
   /\[(\d{4})\]\s+(UKEAT)\s+(\d+)/gi,
-  // Scottish courts
-  /\[(\d{4})\]\s+(CSIH|CSOH|ScotCS|HCJAC)\s+(\d+)/gi,
+  /\[(\d{4})\]\s+(EAT)\s+(\d+)/gi,
+  // Scottish courts - Court of Session & High Court of Justiciary
+  /\[(\d{4})\]\s+(CSIH|CSOH|ScotCS|ScotHC|HCJAC|HCJ)\s+(\d+)/gi,
+  // Northern Ireland courts
+  /\[(\d{4})\]\s+(NICA|NIQB|NIKB|NICH|NIFAM|NIFam|NICC|NICh|NICT|NIMaster)\s+(\d+)/gi,
+  // Court of Protection
+  /\[(\d{4})\]\s+(EWCOP)\s+(\d+)/gi,
+  // Family Court
+  /\[(\d{4})\]\s+(EWFC)\s+(\d+)/gi,
+  // Court Martial Appeal Court
+  /\[(\d{4})\]\s+(EWCA)\s+(Crim)\s+(\d+)/gi,
+  // Immigration and Asylum Chamber
+  /\[(\d{4})\]\s+(UKAITUR)\s+(\d+)/gi,
+  // Admiralty Court (often under EWHC Admlty, but catch standalone)
+  /\[(\d{4})\]\s+(EWHC)\s+(\d+)\s*\(Admiralty\)/gi,
 ];
 
-// Traditional law report patterns (e.g., [1990] 2 AC 605)
+// Traditional law report patterns - comprehensive UK law reports
 const TRADITIONAL_CITATION_PATTERNS = [
-  // Appeal Cases, Queen's Bench, etc.
-  /\[(\d{4})\]\s+(\d+)?\s*(AC|QB|Ch|Fam)\s+(\d+)/gi,
+  // Appeal Cases, Queen's/King's Bench, Chancery, Family
+  /\[(\d{4})\]\s+(\d+)?\s*(AC|QB|KB|Ch|Fam)\s+(\d+)/gi,
   // Weekly Law Reports
   /\[(\d{4})\]\s+(\d+)\s+WLR\s+(\d+)/gi,
-  // All England Law Reports
+  // All England Law Reports (incl. Commercial)
   /\[(\d{4})\]\s+(\d+)\s+All\s+ER\s+(\d+)/gi,
-  // Lloyd's Law Reports
+  /\[(\d{4})\]\s+(\d+)\s+All\s+ER\s+\(Comm\)\s+(\d+)/gi,
+  // Lloyd's Law Reports (maritime/shipping/insurance)
   /\[(\d{4})\]\s+(\d+)\s+Lloyd's\s+Rep\s+(\d+)/gi,
+  /\[(\d{4})\]\s+(\d+)\s+Lloyd's\s+Law\s+Rep\s+(\d+)/gi,
   // Family Law Reports
   /\[(\d{4})\]\s+(\d+)\s+FLR\s+(\d+)/gi,
   // Criminal Appeal Reports
   /\[(\d{4})\]\s+(\d+)\s+Cr\s+App\s+R\s+(\d+)/gi,
+  /\[(\d{4})\]\s+(\d+)\s+Cr\s+App\s+R\s*\(S\)\s+(\d+)/gi,
+  // Industrial Cases Reports / Industrial Relations LR
+  /\[(\d{4})\]\s*(\d*)\s*ICR\s+(\d+)/gi,
+  /\[(\d{4})\]\s*(\d*)\s*IRLR\s+(\d+)/gi,
+  // Business/Company Law
+  /\[(\d{4})\]\s*(\d*)\s*BCLC\s+(\d+)/gi,
+  /\[(\d{4})\]\s*(\d*)\s*BCC\s+(\d+)/gi,
+  // Property & Compensation Reports
+  /\[(\d{4})\]\s*(\d*)\s*P\s*&?\s*CR\s+(\d+)/gi,
+  // Estates Gazette Law Reports
+  /\[(\d{4})\]\s*(\d*)\s*(?:EG|EGLR)\s+(\d+)/gi,
+  // Personal Injury & Quantum Reports
+  /\[(\d{4})\]\s*(\d*)\s*(?:PIQR)\s+[A-Z]?\s*(\d+)/gi,
+  // Medical Law Reports
+  /\[(\d{4})\]\s*(\d*)\s*(?:Med\s*LR|BMLR)\s+(\d+)/gi,
+  // Construction Law Reports
+  /\[(\d{4})\]\s*(\d*)\s*(?:Con\s*LR|BLR)\s+(\d+)/gi,
+  // Housing Law Reports
+  /\[(\d{4})\]\s*(\d*)\s*HLR\s+(\d+)/gi,
+  // Immigration & Asylum Reports
+  /\[(\d{4})\]\s*(\d*)\s*(?:Imm\s*AR|INLR)\s+(\d+)/gi,
+  // Road Traffic Reports
+  /\[(\d{4})\]\s*(\d*)\s*RTR\s+(\d+)/gi,
+  // Tax Cases / Simon's Tax Cases
+  /\[(\d{4})\]\s*(\d*)\s*(?:TC|STC)\s+(\d+)/gi,
+  // European Human Rights Reports
+  /\(\d{4}\)\s+(\d+)\s+EHRR\s+(\d+)/gi,
+  // Session Cases (Scottish)
+  /(\d{4})\s+SC\s+(\d+)/gi,
+  /(\d{4})\s+SLT\s+(\d+)/gi,
+  // Northern Ireland Reports
+  /\[(\d{4})\]\s*(\d*)\s*(?:NI|NIJB)\s+(\d+)/gi,
 ];
 
 /**

@@ -1,16 +1,21 @@
 /**
- * API client for the hallucination auditor backend
- * 
- * For client-side privacy mode:
- * - Document parsing happens in the browser
- * - Only extracted citation strings are sent to the server
- * - Server resolves citations and fetches judgment text
- * - Verification/matching happens back in the browser
+ * API client for the Citation Auditor
+ *
+ * PRIVACY ARCHITECTURE:
+ * - Document parsing happens in the browser (documentParser.ts)
+ * - Citation extraction happens in the browser (citationExtractor.ts)
+ * - Citation URL construction happens in the browser (citationResolver.ts)
+ * - Judgment parsing happens in the browser (judgmentParser.ts)
+ *
+ * This API client only sends:
+ * 1. Public URLs to proxy-fetch (BAILII/FCL URLs for judgment retrieval)
+ * 2. Citation strings for search (when neutral citation URL construction fails)
+ *
+ * NO document content ever leaves the browser.
  */
 
 // In production (when served from same origin), use empty string for relative URLs
 // In development, use localhost:8000
-// Also check hostname to handle cases where PROD flag isn't reliable
 const isLocalhost = typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
@@ -48,16 +53,98 @@ export interface CitationWithContext {
 }
 
 /**
- * Resolve citations to URLs and fetch judgment paragraphs
+ * Proxy-fetch a public URL through the server (CORS proxy).
  *
- * Privacy: Only citation strings and case names are sent to the server.
+ * Only BAILII and FCL URLs are allowed. The server does not process
+ * the content - it just forwards the HTTP response.
+ *
+ * @param url - Public BAILII or FCL URL to fetch
+ * @returns The fetched content and metadata
+ */
+export async function proxyFetch(url: string): Promise<{
+  content: string;
+  status_code: number;
+  content_type: string;
+  ok: boolean;
+}> {
+  const response = await fetch(`${API_BASE}/api/proxy-fetch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Proxy fetch failed: ${error}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Try to fetch a URL directly from the browser (no proxy needed).
+ * This will fail for BAILII due to CORS, but may work for FCL.
+ *
+ * @param url - URL to try fetching directly
+ * @returns Content string if successful, null if CORS blocked
+ */
+export async function tryDirectFetch(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      mode: 'cors',
+      headers: { 'Accept': 'text/html, application/xml, text/xml' },
+    });
+
+    if (response.ok) {
+      return await response.text();
+    }
+    return null;
+  } catch {
+    // CORS error or network error - expected for BAILII
+    return null;
+  }
+}
+
+/**
+ * Fetch judgment content for a URL, trying direct fetch first,
+ * then falling back to the proxy.
+ *
+ * This maximizes privacy: if the browser can fetch directly from
+ * BAILII/FCL, no data goes through our server at all.
+ *
+ * @param url - BAILII or FCL URL
+ * @returns Judgment content string
+ */
+export async function fetchJudgmentContent(url: string): Promise<string | null> {
+  // Try direct fetch first (works for FCL if they support CORS)
+  const directContent = await tryDirectFetch(url);
+  if (directContent && directContent.length > 500) {
+    return directContent;
+  }
+
+  // Fall back to proxy
+  try {
+    const proxyResult = await proxyFetch(url);
+    if (proxyResult.ok && proxyResult.content) {
+      return proxyResult.content;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve citations to URLs and fetch judgment paragraphs.
+ * Uses the legacy endpoint for backward compatibility.
+ *
+ * PRIVACY: Only citation strings and case names are sent to the server.
  * No document content leaves the browser.
  */
 export async function resolveCitations(
   citations: string[] | CitationWithContext[],
   webSearchEnabled: boolean = false
 ): Promise<CitationResolveResponse> {
-  // Determine if we have simple strings or objects with context
   const hasContext = citations.length > 0 && typeof citations[0] === 'object';
 
   const body = hasContext
@@ -72,9 +159,7 @@ export async function resolveCitations(
 
   const response = await fetch(`${API_BASE}/api/resolve-citations`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
 
@@ -87,32 +172,30 @@ export async function resolveCitations(
 }
 
 /**
- * Legacy: Run full audit on server (document sent to server)
- * Use resolveCitations() instead for client-side privacy mode
+ * Batch check if URLs exist (lightweight HEAD requests).
+ * 
+ * The browser constructs BAILII/FCL URLs client-side, then sends
+ * them to this endpoint just to check existence (200 vs 404).
+ * Minimal server traffic - no judgment content is fetched.
  */
-export async function runServerAudit(
-  claims: Array<{ claim_id: string; text: string; citations: Array<{ raw: string }> }>,
-  title: string = 'Citation Audit',
-  webSearchEnabled: boolean = false
-): Promise<any> {
-  const response = await fetch(`${API_BASE}/api/audit`, {
+export async function checkUrlsExist(urls: string[]): Promise<Array<{
+  url: string;
+  exists: boolean;
+  status_code: number;
+  title?: string | null;
+}>> {
+  const response = await fetch(`${API_BASE}/api/check-urls`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      title,
-      claims,
-      web_search_enabled: webSearchEnabled,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls }),
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to run audit: ${error}`);
+    throw new Error(`URL check failed: ${await response.text()}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  return data.results;
 }
 
 /**

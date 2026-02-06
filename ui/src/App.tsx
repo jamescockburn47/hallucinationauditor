@@ -23,11 +23,11 @@ import {
 } from 'lucide-react'
 import './App.css'
 
-// Client-side processing for privacy mode
+// Client-side processing for privacy - all document processing stays in browser
 import { extractTextFromFile } from './lib/documentParser'
 import { extractCitationsWithContext } from './lib/citationExtractor'
-// Verifier functions removed - user verifies manually using the judgment viewer
-import { resolveCitations } from './lib/api'
+import { isNeutralCitation, constructUrls } from './lib/citationResolver'
+import { resolveCitations, checkUrlsExist } from './lib/api'
 
 interface SourceParagraph {
   paragraphNumber: number
@@ -94,9 +94,6 @@ function App() {
 
   // Selected citation for detail view
   const [selectedCitation, setSelectedCitation] = useState<string | null>(null)
-
-  // Judgment viewer search
-  const [judgmentSearch, setJudgmentSearch] = useState('')
 
   // Document viewer state
   const [documentText, setDocumentText] = useState('')
@@ -207,6 +204,10 @@ function App() {
   }
 
   // Run the audit
+  // Flow: 1. Construct URLs client-side for neutral citations
+  //       2. Batch-check URLs exist via lightweight server HEAD requests
+  //       3. For traditional citations, use server search (BAILII/FCL)
+  //       4. Display results - judgment text loads via iframe from user's browser
   const runAudit = async () => {
     if (extractedCitations.length === 0) return
 
@@ -220,37 +221,138 @@ function App() {
     setExtractedCitations(prev => prev.map(c => ({ ...c, status: 'pending' as const, result: undefined })))
 
     try {
-      // Build citations with context for resolution
-      type CitationWithContext = { citation: string; case_name?: string | null }
-      const citationMap = new Map<string, CitationWithContext>()
+      // Separate into neutral (URL can be constructed client-side) and traditional (need server search)
+      type CitationCtx = { citation: string; case_name?: string | null }
+      const neutralCitations: Map<string, CitationCtx> = new Map()
+      const traditionalCitations: Map<string, CitationCtx> = new Map()
 
       extractedCitations.forEach(item => {
         const key = item.citation.toLowerCase()
-        if (!citationMap.has(key)) {
-          citationMap.set(key, {
-            citation: item.citation,
-            case_name: item.caseName
-          })
+        const ctx = { citation: item.citation, case_name: item.caseName }
+        if (isNeutralCitation(item.citation)) {
+          if (!neutralCitations.has(key)) neutralCitations.set(key, ctx)
+        } else {
+          if (!traditionalCitations.has(key)) traditionalCitations.set(key, ctx)
         }
       })
-
-      const citationsWithContext = Array.from(citationMap.values())
 
       // Mark all as resolving
       setExtractedCitations(prev => prev.map(c => ({ ...c, status: 'resolving' as const })))
 
-      // Resolve citations
-      const resolveResponse = await resolveCitations(citationsWithContext, webSearchEnabled)
+      // Results map: citation key -> result
+      const resolvedMap = new Map<string, {
+        source_type: string; url: string | null; title: string | null;
+        case_name: string | null; error?: string
+      }>()
 
-      // Build resolved map
-      const resolvedMap = new Map<string, typeof resolveResponse.resolved[0]>()
-      resolveResponse.resolved.forEach(r => {
-        resolvedMap.set(r.citation.toLowerCase(), r)
-      })
+      // --- Step 1: Neutral citations - construct URLs client-side, batch-check existence ---
+      if (neutralCitations.size > 0) {
+        setAuditProgress({ current: 0, total, phase: `Checking ${neutralCitations.size} neutral citation(s)...` })
 
+        // Build all URLs client-side (no server needed for this step)
+        const urlToCitationKey = new Map<string, string>()
+        const allUrls: string[] = []
+
+        for (const [key, ctx] of neutralCitations) {
+          const urls = constructUrls(ctx.citation)
+          if (urls.length > 0) {
+            // Use the first URL (BAILII preferred)
+            const primaryUrl = urls[0].url
+            urlToCitationKey.set(primaryUrl, key)
+            allUrls.push(primaryUrl)
+            // Store the constructed URL info
+            resolvedMap.set(key, {
+              source_type: urls[0].source === 'bailii' ? 'bailii' : 'fcl',
+              url: primaryUrl,
+              title: null,
+              case_name: ctx.case_name || null,
+            })
+            // Also store FCL fallback URL if available
+            if (urls.length > 1) {
+              const fclUrl = urls[1].url
+              urlToCitationKey.set(fclUrl, key + '__fcl')
+              allUrls.push(fclUrl)
+            }
+          }
+        }
+
+        // Batch-check all URLs via lightweight HEAD requests (minimal server traffic)
+        if (allUrls.length > 0) {
+          setAuditProgress({ current: 0, total, phase: `Checking ${allUrls.length} URLs against BAILII/FCL...` })
+
+          const checkResults = await checkUrlsExist(allUrls)
+
+          // Process results
+          for (const result of checkResults) {
+            const citKey = urlToCitationKey.get(result.url)
+            if (!citKey) continue
+
+            // Skip FCL fallback results if BAILII already found
+            const isFclFallback = citKey.endsWith('__fcl')
+            const realKey = isFclFallback ? citKey.replace('__fcl', '') : citKey
+
+            if (result.exists) {
+              const existing = resolvedMap.get(realKey)
+              // Only update if we don't already have a found result (BAILII preferred)
+              if (!existing || existing.source_type === 'not_found' || isFclFallback) {
+                if (!isFclFallback || !resolvedMap.get(realKey)?.url) {
+                  resolvedMap.set(realKey, {
+                    source_type: result.url.includes('bailii.org') ? 'bailii' : 'fcl',
+                    url: result.url,
+                    title: result.title || null,
+                    case_name: neutralCitations.get(realKey)?.case_name || result.title || null,
+                  })
+                }
+              }
+            } else if (!isFclFallback) {
+              // BAILII URL didn't work - check if FCL fallback will handle it
+              const currentResult = resolvedMap.get(realKey)
+              if (currentResult && currentResult.url === result.url) {
+                // Mark as potentially not found (FCL fallback may still find it)
+                resolvedMap.set(realKey, {
+                  ...currentResult,
+                  source_type: 'not_found',
+                  error: 'Not found on BAILII',
+                })
+              }
+            } else {
+              // FCL fallback also failed
+              const currentResult = resolvedMap.get(realKey)
+              if (currentResult && currentResult.source_type === 'not_found') {
+                resolvedMap.set(realKey, {
+                  ...currentResult,
+                  error: 'Not found on BAILII or Find Case Law',
+                })
+              }
+            }
+          }
+        }
+      }
+
+      // --- Step 2: Traditional citations - need server search (BAILII/FCL search APIs) ---
+      if (traditionalCitations.size > 0) {
+        setAuditProgress({
+          current: neutralCitations.size,
+          total,
+          phase: `Searching databases for ${traditionalCitations.size} traditional citation(s)...`
+        })
+
+        const tradCitationsArray = Array.from(traditionalCitations.values())
+        const resolveResponse = await resolveCitations(tradCitationsArray, webSearchEnabled)
+
+        resolveResponse.resolved.forEach(r => {
+          resolvedMap.set(r.citation.toLowerCase(), {
+            source_type: r.source_type,
+            url: r.url,
+            title: r.title,
+            case_name: r.case_name,
+            error: r.error || undefined,
+          })
+        })
+      }
+
+      // --- Step 3: Map results back to all citations ---
       setAuditProgress({ current: 0, total, phase: 'Processing results...' })
-
-      // Process each citation
       const updatedCitations = [...extractedCitations]
 
       for (let i = 0; i < updatedCitations.length; i++) {
@@ -260,10 +362,9 @@ function App() {
         const resolved = resolvedMap.get(item.citation.toLowerCase())
 
         if (resolved && resolved.source_type !== 'not_found') {
-          // Case found on BAILII/FCL
           updatedCitations[i] = {
             ...item,
-            caseName: resolved.case_name || item.caseName,
+            caseName: resolved.case_name || resolved.title || item.caseName,
             status: 'done',
             result: {
               outcome: 'verified',
@@ -272,15 +373,9 @@ function App() {
               url: resolved.url || undefined,
               title: resolved.title || undefined,
               notes: `Case found on ${resolved.source_type === 'fcl' ? 'Find Case Law' : 'BAILII'}`,
-              judgmentParagraphs: resolved.paragraphs.map(p => ({
-                para_num: p.para_num,
-                text: p.text,
-                speaker: p.speaker
-              }))
             }
           }
         } else {
-          // Case not found - potential hallucination
           updatedCitations[i] = {
             ...item,
             status: 'done',
@@ -293,9 +388,7 @@ function App() {
         }
 
         setExtractedCitations([...updatedCitations])
-
-        // Small delay for visual feedback
-        await new Promise(r => setTimeout(r, 100))
+        await new Promise(r => setTimeout(r, 50))
       }
 
       setAuditProgress({ current: total, total, phase: 'Complete' })
@@ -486,14 +579,14 @@ function App() {
                     <span className="step-number">3</span>
                     <div>
                       <strong>Case Resolution</strong>
-                      <p>Citation strings are sent to our server to find cases on Find Case Law and BAILII.</p>
+                      <p>Citation URLs are constructed in your browser. A minimal CORS proxy fetches public judgments from BAILII/FCL databases.</p>
                     </div>
                   </div>
                   <div className="process-step">
                     <span className="step-number">4</span>
                     <div>
                       <strong>Verification</strong>
-                      <p>Case text is compared against your claims using keyword matching in your browser.</p>
+                      <p>Judgment text is parsed in your browser. You review the case content to verify legal propositions.</p>
                     </div>
                   </div>
                 </div>
@@ -502,9 +595,10 @@ function App() {
               <div className="modal-section privacy-section">
                 <h3>Privacy</h3>
                 <p>
-                  <strong>Your document content never leaves your browser.</strong> Only citation strings
-                  (e.g., "[2019] UKSC 12") and case names are sent to our server for resolution.
-                  We do not store any data.
+                  <strong>Your document content never leaves your browser.</strong> All document parsing,
+                  citation extraction, and judgment text parsing happen locally in your browser.
+                  The only external communication is fetching public case law from BAILII and Find Case Law
+                  via a minimal CORS proxy. We do not store any data.
                 </p>
               </div>
 
@@ -622,7 +716,7 @@ function App() {
                     <span className="step-num">3</span>
                     <div>
                       <strong>Database verification</strong>
-                      <p>Each citation is checked against BAILII and Find Case Law databases</p>
+                      <p>URLs are constructed locally and judgments are fetched from public databases via CORS proxy</p>
                     </div>
                   </div>
                   <div className="splash-step">
@@ -1045,86 +1139,42 @@ function App() {
                     )}
                   </div>
 
-                  {/* Right Column - Judgment Viewer */}
+                  {/* Right Column - Judgment Viewer (iframe loads directly from user's browser) */}
                   <div className="detail-right-column">
-                    {selectedItem.result?.judgmentParagraphs && selectedItem.result.judgmentParagraphs.length > 0 ? (
+                    {selectedItem.result?.caseFound && selectedItem.result?.url ? (
                       <div className="judgment-viewer-full">
                         <div className="judgment-header">
                           <h3>
                             Judgment Text
                             <span className="tooltip-trigger inline">
                               <HelpCircle size={12} />
-                              <div className="tooltip">Full text from the official case database. Search to find relevant passages.</div>
+                              <div className="tooltip">
+                                Loaded directly from {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'} in your browser.
+                                No data passes through our server. Use Ctrl+F to search.
+                              </div>
                             </span>
                           </h3>
-                          {selectedItem.result?.url && (
-                            <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link-small">
-                              Open Full <ExternalLink size={12} />
-                            </a>
-                          )}
+                          <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link-small">
+                            Open in New Tab <ExternalLink size={12} />
+                          </a>
                         </div>
-                        <div className="judgment-search">
-                          <Search size={14} />
-                          <input
-                            type="text"
-                            placeholder="Search judgment text..."
-                            value={judgmentSearch}
-                            onChange={(e) => setJudgmentSearch(e.target.value)}
+                        <div className="judgment-iframe-container">
+                          <iframe
+                            src={selectedItem.result.url}
+                            title={`Judgment: ${selectedItem.caseName || selectedItem.citation}`}
+                            className="judgment-iframe"
+                            sandbox="allow-same-origin allow-scripts allow-popups"
                           />
-                          {judgmentSearch && (
-                            <button className="clear-search" onClick={() => setJudgmentSearch('')}>
-                              <X size={12} />
-                            </button>
-                          )}
                         </div>
-                        <div className="judgment-content-scrollable">
-                          {(() => {
-                            const searchLower = judgmentSearch.toLowerCase()
-
-                            const filteredParas = judgmentSearch
-                              ? selectedItem.result?.judgmentParagraphs?.filter(p =>
-                                  p.text.toLowerCase().includes(searchLower) ||
-                                  p.para_num.includes(judgmentSearch)
-                                )
-                              : selectedItem.result?.judgmentParagraphs
-
-                            if (!filteredParas || filteredParas.length === 0) {
-                              return <p className="no-results">No matching paragraphs found</p>
-                            }
-
-                            return filteredParas.map((para, idx) => {
-                              let displayText = para.text
-
-                              // Highlight search terms
-                              if (judgmentSearch) {
-                                const regex = new RegExp(`(${judgmentSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
-                                displayText = para.text.replace(regex, '<mark>$1</mark>')
-                              }
-
-                              return (
-                                <div
-                                  key={idx}
-                                  className="judgment-para"
-                                  id={`para-${para.para_num}`}
-                                >
-                                  <span className="para-num">[{para.para_num}]</span>
-                                  {para.speaker && <span className="para-speaker">{para.speaker}:</span>}
-                                  <p dangerouslySetInnerHTML={{ __html: displayText }} />
-                                </div>
-                              )
-                            })
-                          })()}
+                        <div className="iframe-privacy-note">
+                          <Shield size={12} />
+                          <span>Page loaded directly from {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'} by your browser - not via our server</span>
                         </div>
                       </div>
                     ) : selectedItem.result?.caseFound ? (
                       <div className="judgment-placeholder">
                         <BookOpen size={32} />
                         <p>Judgment text loading...</p>
-                        {selectedItem.result?.url && (
-                          <a href={selectedItem.result.url} target="_blank" rel="noopener noreferrer" className="source-link">
-                            View on {selectedItem.result.sourceType === 'fcl' ? 'Find Case Law' : 'BAILII'} <ExternalLink size={14} />
-                          </a>
-                        )}
                       </div>
                     ) : (
                       <div className="judgment-placeholder not-found">
