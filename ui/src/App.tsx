@@ -286,48 +286,58 @@ function App() {
 
           const checkResults = await checkUrlsExist(allUrls)
 
-          // Process results
-          for (const result of checkResults) {
+          // Process results - BAILII results first, then FCL fallbacks
+          const bailiiResults = checkResults.filter(r => r.url.includes('bailii.org'))
+          const fclResults = checkResults.filter(r => !r.url.includes('bailii.org'))
+
+          // Process BAILII results first (preferred source)
+          for (const result of bailiiResults) {
             const citKey = urlToCitationKey.get(result.url)
             if (!citKey) continue
 
-            // Skip FCL fallback results if BAILII already found
-            const isFclFallback = citKey.endsWith('__fcl')
-            const realKey = isFclFallback ? citKey.replace('__fcl', '') : citKey
+            if (result.exists) {
+              resolvedMap.set(citKey, {
+                source_type: 'bailii',
+                url: result.url,
+                title: result.title || null,
+                case_name: neutralCitations.get(citKey)?.case_name || result.title || null,
+              })
+            } else {
+              // Mark as not found on BAILII (FCL may still find it)
+              resolvedMap.set(citKey, {
+                source_type: 'not_found',
+                url: null,
+                title: null,
+                case_name: neutralCitations.get(citKey)?.case_name || null,
+                error: 'Not found on BAILII',
+              })
+            }
+          }
+
+          // Process FCL results (fallback - only update if BAILII didn't find it)
+          for (const result of fclResults) {
+            const citKey = urlToCitationKey.get(result.url)
+            if (!citKey) continue
+            const realKey = citKey.replace('__fcl', '')
+
+            const existing = resolvedMap.get(realKey)
+            if (existing && existing.source_type !== 'not_found') continue // BAILII already found it
 
             if (result.exists) {
-              const existing = resolvedMap.get(realKey)
-              // Only update if we don't already have a found result (BAILII preferred)
-              if (!existing || existing.source_type === 'not_found' || isFclFallback) {
-                if (!isFclFallback || !resolvedMap.get(realKey)?.url) {
-                  resolvedMap.set(realKey, {
-                    source_type: result.url.includes('bailii.org') ? 'bailii' : 'fcl',
-                    url: result.url,
-                    title: result.title || null,
-                    case_name: neutralCitations.get(realKey)?.case_name || result.title || null,
-                  })
-                }
-              }
-            } else if (!isFclFallback) {
-              // BAILII URL didn't work - check if FCL fallback will handle it
-              const currentResult = resolvedMap.get(realKey)
-              if (currentResult && currentResult.url === result.url) {
-                // Mark as potentially not found (FCL fallback may still find it)
-                resolvedMap.set(realKey, {
-                  ...currentResult,
-                  source_type: 'not_found',
-                  error: 'Not found on BAILII',
-                })
-              }
-            } else {
-              // FCL fallback also failed
-              const currentResult = resolvedMap.get(realKey)
-              if (currentResult && currentResult.source_type === 'not_found') {
-                resolvedMap.set(realKey, {
-                  ...currentResult,
-                  error: 'Not found on BAILII or Find Case Law',
-                })
-              }
+              // Clean up the FCL URL to point to the HTML page instead of XML
+              const htmlUrl = result.url.replace('/data.xml', '')
+              resolvedMap.set(realKey, {
+                source_type: 'fcl',
+                url: htmlUrl,
+                title: result.title || null,
+                case_name: neutralCitations.get(realKey)?.case_name || result.title || null,
+              })
+            } else if (existing) {
+              // Both BAILII and FCL failed
+              resolvedMap.set(realKey, {
+                ...existing,
+                error: 'Not found on BAILII or Find Case Law',
+              })
             }
           }
         }
@@ -366,9 +376,11 @@ function App() {
         const resolved = resolvedMap.get(item.citation.toLowerCase())
 
         if (resolved && resolved.source_type !== 'not_found') {
+          // Use the official title from BAILII/FCL if we don't have a case name
+          const displayName = item.caseName || resolved.title || resolved.case_name || null
           updatedCitations[i] = {
             ...item,
-            caseName: resolved.case_name || resolved.title || item.caseName,
+            caseName: displayName,
             status: 'done',
             result: {
               outcome: 'verified',

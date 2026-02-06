@@ -272,23 +272,45 @@ function cleanPartyName(text: string): string | undefined {
 }
 
 /**
- * Extract case name from the text preceding a citation (legacy)
+ * Extract case name from the text preceding a citation.
+ *
+ * Handles cases where the name and citation may be on the same line
+ * OR across adjacent lines (common in PDFs and formatted documents):
+ *   "Caparo Industries plc v Dickman
+ *    [1990] 2 AC 605"
  */
 function extractCaseName(textBefore: string): string | undefined {
-  // Look at the last 200 characters before the citation
-  let context = textBefore.slice(-200);
+  // Look at a generous window before the citation
+  let context = textBefore.slice(-400);
 
-  // Important: Only look at text on the same "line" as the citation
-  // Split by numbered list markers (common in legal docs) and newlines
-  // This prevents grabbing case names from previous citations in a list
-  const lineBreakers = /(?:\n|\r|(?:\d{1,3})\.\s+|\[\d+\]\s*)/g;
-  const parts = context.split(lineBreakers);
-  if (parts.length > 1) {
-    // Take only the last segment (same line as citation)
-    context = parts[parts.length - 1];
+  // Strategy 1: Try the immediate line (text after the last paragraph break)
+  // Paragraph breaks = double newline, numbered markers, or bracket markers
+  const paraBreakers = /(?:\n\s*\n|(?:^|\n)\d{1,5}\.\s+|(?:^|\n)\[\d{1,5}\]\s*)/g;
+  const paraParts = context.split(paraBreakers);
+  if (paraParts.length > 1) {
+    // Take the last paragraph segment
+    context = paraParts[paraParts.length - 1];
   }
 
-  return extractCaseNameFromText(context);
+  // Allow single newlines within the context (case name may wrap across lines)
+  // but collapse them to spaces for pattern matching
+  const collapsed = context.replace(/\s*\n\s*/g, ' ').trim();
+
+  // Try extracting from the collapsed context (handles multi-line case names)
+  const result = extractCaseNameFromText(collapsed);
+  if (result) return result;
+
+  // Strategy 2: If that failed, try just the last line (stricter)
+  const lines = context.split(/\n/);
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 3); i--) {
+    const line = lines[i].trim();
+    if (line.length > 5) {
+      const lineResult = extractCaseNameFromText(line);
+      if (lineResult) return lineResult;
+    }
+  }
+
+  return undefined;
 }
 
 /**

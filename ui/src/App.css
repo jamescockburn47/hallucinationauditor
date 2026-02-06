@@ -359,7 +359,7 @@ html, body {
 
 /* Left Panel - Citations List */
 .citations-panel {
-  width: 380px;
+  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -2013,7 +2013,7 @@ html, body {
 /* ===== SPLIT LAYOUT FOR DETAIL PANEL ===== */
 .split-layout {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 260px 1fr;
   height: 100%;
   gap: 0;
 }
@@ -2626,7 +2626,7 @@ html, body {
 /* ===== Iframe Judgment Viewer ===== */
 .judgment-iframe-container {
   flex: 1;
-  min-height: 400px;
+  min-height: 500px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   overflow: hidden;
@@ -2636,7 +2636,7 @@ html, body {
 .judgment-iframe {
   width: 100%;
   height: 100%;
-  min-height: 500px;
+  min-height: 600px;
   border: none;
   background: #fff;
 }
