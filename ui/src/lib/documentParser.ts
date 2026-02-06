@@ -11,24 +11,96 @@ import mammoth from 'mammoth';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 /**
- * Extract text from a PDF file in the browser
+ * Extract text from a PDF file in the browser.
+ * 
+ * Uses PDF.js text item positioning to reconstruct proper line breaks
+ * and paragraph structure. PDF text items are positioned fragments -
+ * we detect vertical gaps between items to insert newlines, preserving
+ * the document structure that citation extraction depends on.
  */
 async function extractPdfText(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   
-  const textParts: string[] = [];
+  const pageTexts: string[] = [];
   
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: any) => item.str)
-      .join(' ');
-    textParts.push(pageText);
+    
+    if (!textContent.items || textContent.items.length === 0) {
+      continue;
+    }
+
+    // Reconstruct text with proper line breaks using item positions.
+    // Each PDF text item has a transform matrix [a, b, c, d, tx, ty]
+    // where ty is the vertical position (higher = further up the page).
+    const lines: string[] = [];
+    let currentLine = '';
+    let lastY: number | null = null;
+    let lastEndX: number | null = null;
+
+    for (const item of textContent.items as any[]) {
+      if (!item.str && !item.hasEOL) continue;
+
+      const ty = item.transform ? item.transform[5] : null;
+      const tx = item.transform ? item.transform[4] : null;
+      const fontSize = item.transform ? Math.abs(item.transform[0]) : 12;
+
+      // Detect line break: significant vertical gap between items
+      if (lastY !== null && ty !== null) {
+        const yDiff = Math.abs(lastY - ty);
+
+        if (yDiff > fontSize * 0.5) {
+          // New line - push current line and start fresh
+          if (currentLine.trim()) {
+            lines.push(currentLine.trim());
+          }
+          currentLine = '';
+
+          // Large vertical gap = paragraph break
+          if (yDiff > fontSize * 1.5) {
+            lines.push('');
+          }
+        } else if (lastEndX !== null && tx !== null) {
+          // Same line - check horizontal gap for word spacing
+          const xGap = tx - lastEndX;
+          if (xGap > fontSize * 0.3 && currentLine && !currentLine.endsWith(' ')) {
+            currentLine += ' ';
+          }
+        }
+      }
+
+      currentLine += item.str || '';
+
+      if (ty !== null) lastY = ty;
+      if (tx !== null && item.width) {
+        lastEndX = tx + item.width;
+      } else {
+        lastEndX = null;
+      }
+
+      // PDF.js explicit end-of-line marker
+      if (item.hasEOL) {
+        if (currentLine.trim()) {
+          lines.push(currentLine.trim());
+        }
+        currentLine = '';
+      }
+    }
+
+    // Don't forget the last line
+    if (currentLine.trim()) {
+      lines.push(currentLine.trim());
+    }
+
+    const pageText = lines.join('\n');
+    if (pageText.trim()) {
+      pageTexts.push(pageText);
+    }
   }
   
-  return textParts.join('\n\n');
+  return pageTexts.join('\n\n');
 }
 
 /**

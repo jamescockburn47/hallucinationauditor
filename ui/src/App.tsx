@@ -95,8 +95,9 @@ function App() {
   // Selected citation for detail view
   const [selectedCitation, setSelectedCitation] = useState<string | null>(null)
 
-  // Document viewer state
+  // Document viewer state (full extracted text, stored separately from paste input)
   const [documentText, setDocumentText] = useState('')
+  const [pasteText, setPasteText] = useState('')
   const [showDocumentViewer, setShowDocumentViewer] = useState(false)
   const [documentSearch, setDocumentSearch] = useState('')
 
@@ -146,6 +147,7 @@ function App() {
     setUploadedFile(null)
     setExtractedCitations([])
     setDocumentText('')
+    setPasteText('')
     setShowDocumentViewer(false)
     setView('upload')
     if (fileInputRef.current) {
@@ -156,7 +158,7 @@ function App() {
   // Extract citations from document or pasted text
   const extractFromDocument = async () => {
     // Allow either file upload or pasted text
-    if (!uploadedFile && documentText.trim().length < 50) return
+    if (!uploadedFile && pasteText.trim().length < 50) return
 
     setIsExtracting(true)
     setError(null)
@@ -165,13 +167,15 @@ function App() {
       let text: string
 
       if (uploadedFile) {
-        // Extract from uploaded file
+        // Extract full text from uploaded file (all pages, no truncation)
         text = await extractTextFromFile(uploadedFile)
-        // Store document text for the document viewer (locally only)
+        // Store full text for the document viewer panel (not shown in paste textarea)
         setDocumentText(text)
+        console.log(`Extracted ${text.length} chars, ${text.split('\n').length} lines from ${uploadedFile.name}`)
       } else {
         // Use pasted text directly
-        text = documentText
+        text = pasteText
+        setDocumentText(text)
       }
 
       if (!text || text.trim().length < 50) {
@@ -815,21 +819,25 @@ function App() {
                 )}
               </div>
 
-              <div className="input-divider">
-                <span>or paste text directly</span>
-              </div>
+              {!uploadedFile && (
+                <>
+                  <div className="input-divider">
+                    <span>or paste text directly</span>
+                  </div>
 
-              <textarea
-                className="paste-textarea"
-                placeholder="Paste LLM output or any text containing legal citations here..."
-                value={documentText}
-                onChange={(e) => {
-                  setDocumentText(e.target.value)
-                  setUploadedFile(null) // Clear file if user pastes text
-                }}
-              />
+                  <textarea
+                    className="paste-textarea"
+                    placeholder="Paste LLM output or any text containing legal citations here..."
+                    value={pasteText}
+                    onChange={(e) => {
+                      setPasteText(e.target.value)
+                      setUploadedFile(null)
+                    }}
+                  />
+                </>
+              )}
 
-              {(uploadedFile || documentText.trim().length > 50) && (
+              {(uploadedFile || pasteText.trim().length > 50) && (
                 <button
                   className="extract-btn-large"
                   onClick={extractFromDocument}
