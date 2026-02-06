@@ -1138,21 +1138,24 @@ def resolve_citation_to_urls(
         resolution_attempts.append(f"Neutral citation matched: {neutral_result['pattern_name']}")
         logger.info(f"Resolved via neutral citation: {neutral_result['url']}")
     
-    # Strategy 2: If traditional citation or neutral didn't match, use search
-    if not candidate_urls or is_traditional_citation(citation_text):
-        if is_traditional_citation(citation_text):
-            resolution_attempts.append("Traditional law report citation detected - using search")
-        
-        traditional_candidates = resolve_traditional_citation(citation_text, case_name)
-        
-        for candidate in traditional_candidates:
-            # Avoid duplicates
-            existing_urls = [c.get("url") for c in candidate_urls]
-            if candidate.get("url") not in existing_urls:
-                candidate_urls.append(candidate)
-        
-        if traditional_candidates:
-            resolution_attempts.append(f"Search found {len(traditional_candidates)} candidate(s)")
+    # Strategy 2: ALWAYS also try search-based resolution
+    # Even for neutral citations - the direct URL may not work if BAILII
+    # stores the case at a different path, or if it's only on FCL.
+    # For traditional citations this is the primary resolution method.
+    if is_traditional_citation(citation_text):
+        resolution_attempts.append("Traditional law report citation detected - using search")
+    
+    # Try BAILII citation finder + search + FCL search
+    search_candidates = resolve_traditional_citation(citation_text, case_name)
+    
+    for candidate in search_candidates:
+        # Avoid duplicates
+        existing_urls = [c.get("url") for c in candidate_urls]
+        if candidate.get("url") not in existing_urls:
+            candidate_urls.append(candidate)
+    
+    if search_candidates:
+        resolution_attempts.append(f"Search found {len(search_candidates)} candidate(s)")
     
     # Determine resolution status
     if len(candidate_urls) == 0:

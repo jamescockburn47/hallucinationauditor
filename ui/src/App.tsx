@@ -26,7 +26,7 @@ import './App.css'
 // Client-side processing for privacy - all document processing stays in browser
 import { extractTextFromFile } from './lib/documentParser'
 import { extractCitationsWithContext } from './lib/citationExtractor'
-import { isNeutralCitation, constructUrls } from './lib/citationResolver'
+import { isNeutralCitation, constructUrls, constructFclHtmlUrl } from './lib/citationResolver'
 import { resolveCitations, checkUrlsExist } from './lib/api'
 
 interface SourceParagraph {
@@ -271,11 +271,11 @@ function App() {
               title: null,
               case_name: ctx.case_name || null,
             })
-            // Also store FCL fallback URL if available
-            if (urls.length > 1) {
-              const fclUrl = urls[1].url
-              urlToCitationKey.set(fclUrl, key + '__fcl')
-              allUrls.push(fclUrl)
+            // Also check FCL HTML page URL (sometimes exists when XML doesn't)
+            const fclHtmlUrl = constructFclHtmlUrl(ctx.citation)
+            if (fclHtmlUrl) {
+              urlToCitationKey.set(fclHtmlUrl, key + '__fcl')
+              allUrls.push(fclHtmlUrl)
             }
           }
         }
@@ -363,6 +363,44 @@ function App() {
             error: r.error || undefined,
           })
         })
+      }
+
+      // --- Step 2.5: Retry unfound neutral citations via server search ---
+      // Direct URL construction sometimes misses cases that BAILII stores
+      // at different paths. The server uses BAILII citation finder, BAILII
+      // search, and FCL Atom search to find cases by other methods.
+      const unfoundNeutral: Array<{ citation: string; case_name?: string | null }> = []
+      for (const [key, ctx] of neutralCitations) {
+        const result = resolvedMap.get(key)
+        if (!result || result.source_type === 'not_found') {
+          unfoundNeutral.push({ citation: ctx.citation, case_name: ctx.case_name })
+        }
+      }
+
+      if (unfoundNeutral.length > 0) {
+        setAuditProgress({
+          current: 0,
+          total,
+          phase: `Deep searching ${unfoundNeutral.length} unfound citation(s) via BAILII/FCL search...`
+        })
+
+        try {
+          const retryResponse = await resolveCitations(unfoundNeutral, webSearchEnabled)
+
+          retryResponse.resolved.forEach(r => {
+            if (r.source_type !== 'not_found') {
+              resolvedMap.set(r.citation.toLowerCase(), {
+                source_type: r.source_type,
+                url: r.url,
+                title: r.title,
+                case_name: r.case_name,
+                error: undefined,
+              })
+            }
+          })
+        } catch (e) {
+          console.warn('Retry search failed:', e)
+        }
       }
 
       // --- Step 3: Map results back to all citations ---

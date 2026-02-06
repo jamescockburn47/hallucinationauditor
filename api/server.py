@@ -311,6 +311,13 @@ async def check_urls_exist(request: BatchCheckRequest):
                 if "<akomantoso" not in lower and "<frbrwork" not in lower:
                     return UrlCheckResult(url=url, exists=False, status_code=404)
 
+            # FCL HTML: check for real case content (not "Page not found")
+            if "caselaw.nationalarchives.gov.uk" in url and not url.endswith(".xml"):
+                if "page not found" in lower[:2000]:
+                    return UrlCheckResult(url=url, exists=False, status_code=404)
+                if len(content) < 5000:
+                    return UrlCheckResult(url=url, exists=False, status_code=404)
+
             # Extract title
             title = None
             import re as re_mod

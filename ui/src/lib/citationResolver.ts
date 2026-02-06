@@ -289,6 +289,27 @@ export function constructUrls(citation: string): ResolvedUrl[] {
 }
 
 /**
+ * Construct a human-readable FCL URL (HTML page, not XML data endpoint).
+ * These are the public-facing pages users can view in a browser.
+ */
+export function constructFclHtmlUrl(citation: string): string | null {
+  for (const [, config] of Object.entries(FCL_PATTERNS)) {
+    const match = citation.match(config.pattern);
+    if (match) {
+      const year = match[1];
+      const num = match[2];
+      // Convert XML data URL template to HTML page URL
+      const htmlUrl = config.template
+        .replace('{year}', year)
+        .replace('{num}', num)
+        .replace('/data.xml', '');
+      return htmlUrl;
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve a citation entirely client-side.
  * For neutral citations, constructs URLs directly.
  * For traditional citations, marks as needing server search.
