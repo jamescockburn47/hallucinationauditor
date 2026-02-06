@@ -25,5 +25,4 @@ export {
   checkHealth,
   type ResolvedCitation,
   type CitationResolveResponse,
-  type UrlCheckResult,
 } from './api';
